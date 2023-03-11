@@ -1,0 +1,5 @@
+function main() -> int {
+    var x : int = 7
+    print(x)
+    return 0
+}

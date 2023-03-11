@@ -37,7 +37,7 @@ def validate_generate_args(args):
         raise Exception(f"{args['directory']} is not a directory.")
     if not os.path.isfile(args["source"]):
         raise Exception(f"{args['file']} is not a directory.")
-    valid_test_kinds = ["emit", "exitcode"]
+    valid_test_kinds = ["emit", "exitcode", "stdout"]
     if args["kind"] not in valid_test_kinds:
         raise Exception(f"{args['kind']} is not a generate-able test kind (one of: {valid_test_kinds})")
 
@@ -66,11 +66,22 @@ def validate_metadata(manifest, metadata, test):
         if key not in metadata or type(metadata[key]) != type_:
             raise Exception(f"Must have \"{key}\" defined in `{test}` metadata ({type_} type).")
     expect("test-kind", str)
-    valid_test_kinds = ["emit", "exitcode"]
+    valid_test_kinds = ["emit", "exitcode", "stdout"]
     if metadata["test-kind"] not in valid_test_kinds:
         raise Exception(f"\"test-kind\" in `{test}` metadata must be one of {valid_test_kinds}.")
     if metadata["test-kind"] == "emit" and "compile-command-emit" not in manifest:
         raise Exception(f"(`{test}`) Cannot define an \"emit\"-type test without defining \"compile-command-emit\" in `manifest.json`")
+
+def compare_text(expected, got, expected_filename, got_filename):
+    assert('\r' not in expected)
+    assert('\r' not in got)
+    diff = difflib.context_diff(
+        [f"{s}\n" for s in expected.split('\n')],
+        [f"{s}\n" for s in got.split('\n')],
+        fromfile=expected_filename,
+        tofile=got_filename
+    )
+    return expected == got, ''.join(diff)
 
 def run_test(args, manifest, path, depth):
     test_source_fullname = f"{path}.{manifest['language-extension']}"
@@ -121,18 +132,14 @@ def run_test(args, manifest, path, depth):
         generated_source_fullname = f"{path}.{manifest['emit-extension']}"
         with open(generated_source_fullname, "r") as f:
             generated_source = f.read()
-        if expected_output == generated_source:
+        same, diff = compare_text(expected_output, generated_source, expect_file_basename, generated_source_basename)
+        if same:
             happy()
             return
         else:
             sad()
             print_at_depth(depth, colored(f"  Test did not match expected output (emit)!"))
-            sys.stdout.writelines(difflib.unified_diff(
-                expected_output,
-                generated_source,
-                fromfile=expect_file_basename,
-                tofile=generated_source_basename
-            ))
+            print(diff)
             return
 
     # Otherwise, we run the executable
@@ -150,6 +157,18 @@ def run_test(args, manifest, path, depth):
         else:
             sad()
             print_at_depth(depth, colored(f"  Test exited with code {executable_result.returncode}, but code {expected_exitcode} was expected."))
+            return
+
+    if expect_metadata["test-kind"] == "stdout":
+        stdout = executable_result.stdout.replace(b'\r\n', b'\n').decode('utf-8')
+        same, diff = compare_text(expected_output, stdout, expect_file_basename, "<stdout>")
+        if same:
+            happy()
+            return
+        else:
+            sad()
+            print_at_depth(depth, colored(f"  Test did not match expected output (stdout)!"))
+            print(diff)
             return
 
     raise Exception("Unreachable")
@@ -227,7 +246,9 @@ def generate_expect_file_from_source(args, manifest):
         with open(generated_expect_fullname, "w") as f:
             json.dump(header, f, indent = 4)
             f.write('\n---\n')
-            f.write(output)
+            # Python adds \r to every \n automatically, so if we have \r's
+            # coming from stdout or anywhere else, let's not double them up.
+            f.write(''.join(output.split('\r')))
 
     verbose_information = []
 
@@ -262,6 +283,10 @@ def generate_expect_file_from_source(args, manifest):
 
     if args["kind"] == "exitcode":
         make(f"{executable_result.returncode}\n")
+        return
+
+    if args["kind"] == "stdout":
+        make(executable_result.stdout.decode('utf-8'))
         return
 
     raise Exception("Unreachable")
