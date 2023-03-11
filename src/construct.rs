@@ -191,6 +191,9 @@ fn body_to_ir(body: Vec<Statement>, ctor: &mut FunctionConstructor) -> BodyInfor
                 let rhs = expression.to_ir(ctor, current_block);
                 let index = ctor.add_assignment(current_block, type_.to_ir(), rhs);
                 ctor.add_return(current_block, type_.to_ir(), index);
+                // If we don't break we might continue the loop and start constructing
+                // unreachable post-return code!
+                break;
             }
             Statement::If(If {
                 condition: (type_, condition),

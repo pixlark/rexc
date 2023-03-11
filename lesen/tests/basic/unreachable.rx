@@ -1,0 +1,8 @@
+function main() -> int {
+    var b : bool = true
+    if b {
+        return 1
+        print(1337)
+    }
+    return 0
+}
