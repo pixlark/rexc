@@ -2,6 +2,24 @@
 //! code. This is just in case we ever want to emit to LLVM or something...
 //! as it is, we're just emitting C.
 
+#[derive(Debug, Copy, Clone)]
+pub struct BlockLocator(pub usize);
+
+impl BlockLocator {
+    pub fn index(&self) -> usize {
+        self.0
+    }
+}
+
+#[derive(Debug, Copy, Clone)]
+pub struct Variable(pub usize);
+
+impl Variable {
+    pub fn index(&self) -> usize {
+        self.0
+    }
+}
+
 #[derive(Copy, Clone)] // NOTE: Probably temporary while Type is limited to Int
 pub enum Type {
     Void,
@@ -19,27 +37,28 @@ pub enum Operation {
 
 pub enum Rhs {
     Parameter(String),
-    Variable(usize),
+    Variable(Variable),
     Literal(Literal),
-    Operation(Operation, usize, usize),
-    FunctionCall(String, Vec<usize>),
+    Operation(Operation, Variable, Variable),
+    FunctionCall(String, Vec<Variable>),
 }
 
 pub struct Assignment {
     pub type_: Type,
-    pub lhs: Option<usize>,
+    pub lhs: Option<Variable>,
     pub rhs: Rhs,
 }
 
-pub type TypedVariable = (Type, usize);
+pub type TypedVariable = (Type, Variable);
 
 pub enum BlockTerminator {
-    ConditionalBranch(usize, usize, TypedVariable),
-    Return(usize, Type),
+    Branch(BlockLocator),
+    ConditionalBranch(BlockLocator, BlockLocator, TypedVariable),
+    Return(Variable, Type),
 }
 
 pub struct Block {
-    pub index: usize,
+    pub locator: BlockLocator,
     pub assignments: Vec<Assignment>,
     pub block_terminator: BlockTerminator,
 }

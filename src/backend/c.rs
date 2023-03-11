@@ -21,8 +21,8 @@ trait CWriter {
     fn space(&mut self) -> EmitResult;
     fn newline(&mut self) -> EmitResult;
     fn string(&mut self, s: &str) -> EmitResult;
-    fn variable(&mut self, i: usize) -> EmitResult;
-    fn label(&mut self, i: usize) -> EmitResult;
+    fn variable(&mut self, v: Variable) -> EmitResult;
+    fn label(&mut self, b: BlockLocator) -> EmitResult;
 }
 
 impl<W: Write, E: EmitC<W>> CEmitter<W, E> for LineWriter<W> {
@@ -44,12 +44,12 @@ impl<W: Write> CWriter for LineWriter<W> {
         write!(self, "{}", s)
     }
 
-    fn variable(&mut self, i: usize) -> EmitResult {
-        write!(self, "_{}", i)
+    fn variable(&mut self, v: Variable) -> EmitResult {
+        write!(self, "_{}", v.index())
     }
 
-    fn label(&mut self, i: usize) -> EmitResult {
-        write!(self, "_b{}", i)
+    fn label(&mut self, b: BlockLocator) -> EmitResult {
+        write!(self, "_b{}", b.index())
     }
 }
 
@@ -150,6 +150,12 @@ impl Function {
 impl<W: Write> EmitC<W> for BlockTerminator {
     fn emit_c(&self, writer: &mut LineWriter<W>) -> EmitResult {
         match self {
+            BlockTerminator::Branch(to) => {
+                writer.string("goto ")?;
+                writer.label(*to)?;
+                writer.string(";")?;
+                writer.newline()?;
+            }
             BlockTerminator::ConditionalBranch(from, to, condition) => {
                 writer.string("if (")?;
                 writer.variable(condition.1)?;
@@ -174,7 +180,7 @@ impl<W: Write> EmitC<W> for BlockTerminator {
 impl<W: Write> EmitC<W> for Block {
     fn emit_c(&self, writer: &mut LineWriter<W>) -> EmitResult {
         // Label that starts a block
-        writer.label(self.index)?;
+        writer.label(self.locator)?;
         writer.string(":")?;
         writer.newline()?;
         // Block consists of assignments without control flow
