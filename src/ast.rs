@@ -45,6 +45,10 @@ pub enum Statement {
     MakeVariable(MakeVariable),
     Return(InferredTypedExpression),
     If(If),
+    // NOTE: Temporary, eventually print will be function in the standard
+    //       library. Right now it's built-in just so we can get up and running
+    //       with end-to-end tests.
+    Print(InferredTypedExpression),
 }
 
 #[derive(Debug)]

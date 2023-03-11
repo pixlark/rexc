@@ -148,8 +148,17 @@ fn if_(input: &str) -> nom::IResult<&str, ast::Statement> {
         .parse(input)
 }
 
+fn print_(input: &str) -> nom::IResult<&str, ast::Statement> {
+    nom::preceded(
+        ws(nom::tag("print")),
+        nom::delimited(ws(nom::char('(')), expression, ws(nom::char(')'))),
+    )
+    .map(|expression| ast::Statement::Print((None, expression)))
+    .parse(input)
+}
+
 fn statement(input: &str) -> nom::IResult<&str, ast::Statement> {
-    nom::alt((var_decl, return_, if_)).parse(input)
+    nom::alt((var_decl, return_, if_, print_)).parse(input)
 }
 
 fn body(input: &str) -> nom::IResult<&str, Vec<ast::Statement>> {

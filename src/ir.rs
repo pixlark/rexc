@@ -4,6 +4,7 @@
 
 #[derive(Copy, Clone)] // NOTE: Probably temporary while Type is limited to Int
 pub enum Type {
+    Void,
     Int,
 }
 
@@ -21,12 +22,12 @@ pub enum Rhs {
     Variable(usize),
     Literal(Literal),
     Operation(Operation, Box<Rhs>, Box<Rhs>),
-    FunctionCall(String, Vec<Rhs>),
+    FunctionCall(String, Vec<usize>),
 }
 
 pub struct Assignment {
     pub type_: Type,
-    pub lhs: usize,
+    pub lhs: Option<usize>,
     pub rhs: Rhs,
 }
 

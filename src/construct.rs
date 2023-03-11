@@ -72,7 +72,7 @@ impl FunctionConstructor {
 
         block.assignments.push(ir::Assignment {
             type_,
-            lhs: index,
+            lhs: Some(index),
             rhs,
         });
 
@@ -99,6 +99,15 @@ impl FunctionConstructor {
             (condition_type, condition_var),
         ));
     }
+    fn add_void_function_call(&mut self, block: usize, name: String, arguments: Vec<usize>) {
+        let block = &mut self.body[block];
+        let rhs = ir::Rhs::FunctionCall(name, arguments);
+        block.assignments.push(ir::Assignment {
+            type_: ir::Type::Void,
+            lhs: None,
+            rhs,
+        });
+    }
 }
 
 impl Type {
@@ -111,7 +120,7 @@ impl Type {
 }
 
 impl Expression {
-    fn to_ir(self, ctor: &mut FunctionConstructor) -> ir::Rhs {
+    fn to_ir(self, ctor: &FunctionConstructor) -> ir::Rhs {
         match self {
             Expression::Literal(literal) => match literal {
                 Literal::Int(i) => ir::Rhs::Literal(ir::Literal::Int(i)),
@@ -174,6 +183,17 @@ fn body_to_ir(body: Vec<Statement>, ctor: &mut FunctionConstructor) -> usize {
                 );
 
                 current_block = after_block;
+            }
+            Statement::Print((type_, expression)) => {
+                let type_ = type_.unwrap();
+                let prelude_function_name = String::from(match type_ {
+                    Type::Int => "print_int",
+                    Type::Bool => "print_bool",
+                });
+
+                let rhs = expression.to_ir(ctor);
+                let index = ctor.add_assignment(current_block, type_.to_ir(), rhs);
+                ctor.add_void_function_call(current_block, prelude_function_name, vec![index]);
             }
         }
     }

@@ -64,6 +64,7 @@ impl ir::Operation {
 }
 
 impl ast::Expression {
+    // TODO(Brooke): This should not be &mut
     fn typecheck(&mut self, type_map: &mut TypeMap) -> Result<ast::Type, TypeError> {
         match self {
             ast::Expression::Literal(lit) => match lit {
@@ -126,6 +127,10 @@ impl ast::Statement {
                 for statement in body {
                     statement.typecheck(type_map, function_returns)?;
                 }
+            }
+            ast::Statement::Print((unfilled_type, expression)) => {
+                let infer_type = expression.typecheck(type_map)?;
+                *unfilled_type = Some(infer_type);
             }
         }
         Ok(())

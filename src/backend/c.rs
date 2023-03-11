@@ -69,6 +69,7 @@ pub trait EmitC<W: Write> {
 impl<W: Write> EmitC<W> for Type {
     fn emit_c(&self, writer: &mut LineWriter<W>) -> EmitResult {
         match self {
+            Type::Void => write!(writer, "void"), // TODO(Brooke): Should this panic maybe?
             Type::Int => write!(writer, "int"),
         }?;
         Ok(())
@@ -106,7 +107,7 @@ impl<W: Write> EmitC<W> for Rhs {
                 writer.string(name)?;
                 writer.string("(")?;
                 for (i, argument) in arguments.iter().enumerate() {
-                    writer.emit(argument)?;
+                    writer.variable(*argument)?;
                     if i < arguments.len() - 1 {
                         writer.string(", ")?;
                     }
@@ -178,10 +179,15 @@ impl<W: Write> EmitC<W> for Block {
         writer.newline()?;
         // Block consists of assignments without control flow
         for assignment in self.assignments.iter() {
-            writer.emit(&assignment.type_)?;
-            writer.space()?;
-            writer.variable(assignment.lhs)?;
-            writer.string(" = ")?;
+            if !matches!(assignment.type_, Type::Void) {
+                // Special case - void functions can't have their results assigned to a variable in C
+                // TODO(Brooke): The connection between `Void` and `lhs` existing should be typed - i.e.
+                //               it shouldn't require a `.unwrap()`.
+                writer.emit(&assignment.type_)?;
+                writer.space()?;
+                writer.variable(assignment.lhs.unwrap())?;
+                writer.string(" = ")?;
+            }
             writer.emit(&assignment.rhs)?;
             writer.string(";")?;
             writer.newline()?;
@@ -193,8 +199,14 @@ impl<W: Write> EmitC<W> for Block {
     }
 }
 
+const C_PRELUDE: &str = include_str!("../../prelude/prelude.c");
+
 impl<W: Write> EmitC<W> for Function {
     fn emit_c(&self, writer: &mut LineWriter<W>) -> EmitResult {
+        // TODO(Brooke): Once we can have more than one function per source file, this should
+        //               be moved out of the impl for Function
+        write!(writer, "{}", C_PRELUDE)?;
+
         self.emit_c_header(writer)?;
         writer.string(" {")?;
         writer.newline()?;
