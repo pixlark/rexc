@@ -1,7 +1,17 @@
+# Rust
 /target
+
+# VSCode
 .vscode/
+
+# Lesen artifacts
+lesen/tests/**/*.exe
+lesen/tests/**/*.rx.c
 
 # Source file used for random poking and prodding, not worthy of committing
 source.rx
 source.rx.c
 source.exe
+
+# Misc. C environment files
+**/.clang-format
