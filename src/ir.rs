@@ -21,7 +21,7 @@ pub enum Rhs {
     Parameter(String),
     Variable(usize),
     Literal(Literal),
-    Operation(Operation, Box<Rhs>, Box<Rhs>),
+    Operation(Operation, usize, usize),
     FunctionCall(String, Vec<usize>),
 }
 

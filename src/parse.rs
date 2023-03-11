@@ -90,7 +90,9 @@ macro_rules! left_assoc_operator {
     ($sep:expr, $sub:expr, $op:expr) => {
         (nom::separated_list1($sep, $sub).map(|vec| {
             vec.into_iter()
-                .reduce(|a, b| ast::Expression::Operation($op, Box::new(a), Box::new(b)))
+                .reduce(|a, b| {
+                    ast::Expression::Operation($op, Box::new((None, a)), Box::new((None, b)))
+                })
                 .unwrap()
         }))
     };

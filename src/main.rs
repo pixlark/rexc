@@ -128,8 +128,8 @@ function foo(x: int, b: bool) -> int {
                     None,
                     ast::Expression::Operation(
                         ir::Operation::Add,
-                        Box::new(ast::Expression::Literal(ast::Literal::Int(1))),
-                        Box::new(ast::Expression::Literal(ast::Literal::Bool(false))),
+                        Box::new((None, ast::Expression::Literal(ast::Literal::Int(1)))),
+                        Box::new((None, ast::Expression::Literal(ast::Literal::Bool(false)))),
                     ),
                 ))],
             };
@@ -188,8 +188,8 @@ function foo(x: int, b: bool) -> int {
                         None,
                         ast::Expression::Operation(
                             ir::Operation::Add,
-                            Box::new(ast::Expression::Variable(String::from("x"))),
-                            Box::new(ast::Expression::Literal(ast::Literal::Int(1))),
+                            Box::new((None, ast::Expression::Variable(String::from("x")))),
+                            Box::new((None, ast::Expression::Literal(ast::Literal::Int(1)))),
                         ),
                     ),
                     body: vec![ast::Statement::Return((
@@ -247,8 +247,14 @@ function foo(x: int, b: bool) -> int {
                         Some(ast::Type::Int),
                         ast::Expression::Operation(
                             ir::Operation::Add,
-                            Box::new(ast::Expression::Variable(String::from("x"))),
-                            Box::new(ast::Expression::Literal(ast::Literal::Int(1))),
+                            Box::new((
+                                Some(ast::Type::Int),
+                                ast::Expression::Variable(String::from("x")),
+                            )),
+                            Box::new((
+                                Some(ast::Type::Int),
+                                ast::Expression::Literal(ast::Literal::Int(1)),
+                            )),
                         ),
                     ),
                     body: vec![ast::Statement::Return((

@@ -1,2 +1,4 @@
  - Does `EmitC` really need to be its own trait? It's nice that way because we can express everything as `write.foo()`, but maybe it's needlessly restrictive on what arguments can be passed to `emit`...
  - Should detect a lack of block terminator before we get to construction. Or maybe construction should be able to return an error?
+ - Create an `.unwrap()` wrapper for modules that expect things from previous stages. For example, if an unwrap in `construct.rs` fails because the typechecker failed to fill in a type inference, that shouldn't give a standard unwrap error, it should panic with some kind of "Internal Compiler Error" message.
+   - Eventually this wrapper would take a Span reference to produce a better error message.

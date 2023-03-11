@@ -93,13 +93,13 @@ impl<W: Write> EmitC<W> for Rhs {
             Rhs::Literal(literal) => writer.emit(literal),
             Rhs::Operation(op, left, right) => {
                 writer.string("(")?;
-                writer.emit(left.as_ref())?;
+                writer.variable(*left)?;
                 writer.space()?;
                 match *op {
                     Operation::Add => writer.string("+"),
                 }?;
                 writer.space()?;
-                writer.emit(right.as_ref())?;
+                writer.variable(*right)?;
                 writer.string(")")?;
                 Ok(())
             }

@@ -9,6 +9,9 @@ pub enum Type {
     Bool,
 }
 
+pub type InferredType = Option<Type>;
+pub type InferredTypedExpression = (InferredType, Expression);
+
 #[derive(Debug)]
 pub enum Literal {
     Int(i64),
@@ -19,13 +22,12 @@ pub enum Literal {
 pub enum Expression {
     Literal(Literal),
     Variable(String),
-    Operation(ir::Operation, Box<Expression>, Box<Expression>),
+    Operation(
+        ir::Operation,
+        Box<InferredTypedExpression>,
+        Box<InferredTypedExpression>,
+    ),
 }
-
-pub type TypedExpression = (Type, Expression);
-
-pub type InferredType = Option<Type>;
-pub type InferredTypedExpression = (InferredType, Expression);
 
 #[derive(Debug)]
 pub struct MakeVariable {

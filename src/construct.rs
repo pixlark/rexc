@@ -3,6 +3,7 @@
 //! by any of the backends.
 
 use std::collections::HashMap;
+use std::thread::current;
 
 use super::ast::*;
 use super::ir;
@@ -120,7 +121,7 @@ impl Type {
 }
 
 impl Expression {
-    fn to_ir(self, ctor: &FunctionConstructor) -> ir::Rhs {
+    fn to_ir(self, ctor: &mut FunctionConstructor, block: usize) -> ir::Rhs {
         match self {
             Expression::Literal(literal) => match literal {
                 Literal::Int(i) => ir::Rhs::Literal(ir::Literal::Int(i)),
@@ -138,9 +139,16 @@ impl Expression {
                 }
             }
             Expression::Operation(operation, left, right) => {
-                let left = left.to_ir(ctor);
-                let right = right.to_ir(ctor);
-                ir::Rhs::Operation(operation, Box::new(left), Box::new(right))
+                let (left_type, left) = *left;
+                let (right_type, right) = *right;
+                // Create SSA assignment chain for left expression
+                let left_rhs = left.to_ir(ctor, block);
+                let left = ctor.add_assignment(block, left_type.unwrap().to_ir(), left_rhs);
+                // Create SSA assignment chain for right expression
+                let right_rhs = right.to_ir(ctor, block);
+                let right = ctor.add_assignment(block, right_type.unwrap().to_ir(), right_rhs);
+                // Return new RHS which uses those chains
+                ir::Rhs::Operation(operation, left, right)
             }
         }
     }
@@ -153,13 +161,13 @@ fn body_to_ir(body: Vec<Statement>, ctor: &mut FunctionConstructor) -> usize {
     for statement in body {
         match statement {
             Statement::MakeVariable(MakeVariable { type_, lhs, rhs }) => {
-                let ir_rhs = rhs.to_ir(ctor);
+                let ir_rhs = rhs.to_ir(ctor, current_block);
                 let index = ctor.add_assignment(current_block, type_.to_ir(), ir_rhs);
                 ctor.variable_map.insert(lhs, index);
             }
             Statement::Return((type_, expression)) => {
                 let type_ = type_.unwrap();
-                let rhs = expression.to_ir(ctor);
+                let rhs = expression.to_ir(ctor, current_block);
                 let index = ctor.add_assignment(current_block, type_.to_ir(), rhs);
                 ctor.add_return(current_block, type_.to_ir(), index);
             }
@@ -168,7 +176,7 @@ fn body_to_ir(body: Vec<Statement>, ctor: &mut FunctionConstructor) -> usize {
                 body: if_body,
             }) => {
                 let type_ = type_.unwrap();
-                let rhs = condition.to_ir(ctor);
+                let rhs = condition.to_ir(ctor, current_block);
                 let index = ctor.add_assignment(current_block, type_.to_ir(), rhs);
 
                 let if_entry_block = body_to_ir(if_body, ctor);
@@ -191,7 +199,7 @@ fn body_to_ir(body: Vec<Statement>, ctor: &mut FunctionConstructor) -> usize {
                     Type::Bool => "print_bool",
                 });
 
-                let rhs = expression.to_ir(ctor);
+                let rhs = expression.to_ir(ctor, current_block);
                 let index = ctor.add_assignment(current_block, type_.to_ir(), rhs);
                 ctor.add_void_function_call(current_block, prelude_function_name, vec![index]);
             }

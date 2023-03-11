@@ -72,13 +72,21 @@ impl ast::Expression {
                 ast::Literal::Bool(_) => Ok(ast::Type::Bool),
             },
             ast::Expression::Operation(op, lhs, rhs) => {
+                let (lhs_unfilled_type, lhs) = lhs.as_mut();
+                let (rhs_unfilled_type, rhs) = rhs.as_mut();
+
                 let infer_left = lhs.typecheck(type_map)?;
                 let infer_right = rhs.typecheck(type_map)?;
+
                 if !op.accepts(&infer_left, &infer_right) {
                     return Err(TypeError {
                         kind: TypeErrorKind::IncompatibleOperands(*op),
                     });
                 }
+
+                *lhs_unfilled_type = Some(infer_left);
+                *rhs_unfilled_type = Some(infer_right);
+
                 let produced_type = op.produce(&infer_left, &infer_right);
                 Ok(produced_type)
             }
