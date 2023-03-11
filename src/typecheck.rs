@@ -48,17 +48,12 @@ impl std::fmt::Display for TypeError {
 pub type TypeMap = HashMap<String, ast::Type>;
 
 impl ir::Operation {
-    fn accept_left(&self, type_: ast::Type) -> bool {
+    fn accepts(&self, left: &ast::Type, right: &ast::Type) -> bool {
         match self {
-            Self::Add => matches!(type_, ast::Type::Int),
+            Self::Add => matches!((left, right), (ast::Type::Int, ast::Type::Int)),
         }
     }
-    fn accept_right(&self, type_: ast::Type) -> bool {
-        match self {
-            Self::Add => matches!(type_, ast::Type::Int),
-        }
-    }
-    fn produce(&self, lhs: ast::Type, rhs: ast::Type) -> ast::Type {
+    fn produce(&self, lhs: &ast::Type, rhs: &ast::Type) -> ast::Type {
         match self {
             Self::Add => match (lhs, rhs) {
                 (ast::Type::Int, ast::Type::Int) => ast::Type::Int,
@@ -78,12 +73,12 @@ impl ast::Expression {
             ast::Expression::Operation(op, lhs, rhs) => {
                 let infer_left = lhs.typecheck(type_map)?;
                 let infer_right = rhs.typecheck(type_map)?;
-                if !op.accept_left(infer_left) || !op.accept_right(infer_right) {
+                if !op.accepts(&infer_left, &infer_right) {
                     return Err(TypeError {
                         kind: TypeErrorKind::IncompatibleOperands(*op),
                     });
                 }
-                let produced_type = op.produce(infer_left, infer_right);
+                let produced_type = op.produce(&infer_left, &infer_right);
                 Ok(produced_type)
             }
             ast::Expression::Variable(name) => match type_map.get(name) {

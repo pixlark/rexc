@@ -1,2 +1,7 @@
 /target
 .vscode/
+
+# Source file used for random poking and prodding, not worthy of committing
+source.rx
+source.rx.c
+source.exe
