@@ -3,6 +3,7 @@
 
 use std::io::{LineWriter, Result, Write};
 
+use super::super::internal_error::*;
 use super::super::ir::*;
 
 pub type EmitResult = Result<()>;
@@ -161,7 +162,9 @@ impl<W: Write> EmitC<W> for BlockTerminator {
         match self {
             BlockTerminator::Branch(to) => {
                 writer.string("goto ")?;
-                writer.label(to.unwrap())?;
+                writer.label(to.rexc_unwrap(
+                    "Somehow the C emitter got hold of an unfilled Branch instruction.",
+                ))?;
                 writer.string(";")?;
                 writer.newline()?;
             }

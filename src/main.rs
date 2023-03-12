@@ -5,16 +5,20 @@
 //! The compiler follows a linear pipeline from source to emitted C:
 //!   1. Parsing
 //!     - Converts source file to abstract syntax tree.
-//!   2. Desugaring
+//!   2. Desugaring (Not yet implemented)
 //!     - Transforms complex elements of the abstract syntax tree into simple
 //!       combinations of more fundamental elements.
 //!   3. Typechecking
 //!     - Validates the type system, ensuring that there are no type-level
 //!       errors in the source.
-//!   4. Construction
+//!   4. Validation
+//!     - Performs analysis on the typed, desugared AST to catch errors before
+//!       construction starts (at which point any issues become Internal Compiler
+//!       Errors which ideally should not be user-facing)
+//!   5. Construction
 //!     - Transforms the abstract syntax tree into intermediate representation,
 //!       which is linearized into groups of basic blocks connected by gotos.
-//!   5. Emitting
+//!   6. Emitting
 //!     - The C backend (or in the future possible another backend) takes the
 //!       intermediate representation and uses it to write out a .c file, which
 //!       can then be compiled into our final executable.
@@ -22,9 +26,11 @@
 mod ast;
 mod backend;
 mod construct;
+mod internal_error;
 mod ir;
 mod parse;
 mod typecheck;
+mod validation;
 
 // TODO(Brooke): Move this out of here!!!
 #[cfg(test)]
@@ -58,6 +64,7 @@ function foo(x: int, b: bool) -> int {
 ";
         let (_, mut ast) = parse::function(source).unwrap();
         ast.typecheck().unwrap();
+        ast.validate().unwrap();
 
         let ir_ = ast.to_ir();
 
@@ -206,6 +213,7 @@ function foo(x: int, b: bool) -> int {
             println!("\n\n* Rexc TYPE ERROR:\n  {}\n", err);
             panic!();
         }
+        f.validate().unwrap();
 
         let ir_f = f.to_ir();
 
@@ -303,16 +311,40 @@ fn compile(
 
     let source = std::fs::read_to_string(&path).unwrap();
 
-    // 1. Parse (Rexc source -> Untyped AST)
-    let (_, mut ast) = parse::function(&source).unwrap();
+    // 1. Parse (Rexc source -> Sugared Untyped AST)
+    let mut ast = match parse::function(&source) {
+        Ok((_, ast)) => ast,
+        Err(err) => {
+            println!("Parse Error!\n  {}", err);
+            return;
+        }
+    };
 
-    // 2. Typecheck (Untyped AST -> Typed AST)
-    ast.typecheck().unwrap();
+    // 2. Desugaring (Sugared Untyped AST -> Desugared Untyped AST)
+    // Not implemented (not yet needed for any constructs)
 
-    // 3. Construct (Typed AST -> IR)
+    // 3. Typecheck (Desugared Untyped AST -> Desugared Typed AST)
+    match ast.typecheck() {
+        Ok(()) => {}
+        Err(err) => {
+            println!("Type Error!\n  {}", err);
+            return;
+        }
+    }
+
+    // 4. Validation (Desugared Typed AST -> Desugared Typed AST)
+    match ast.validate() {
+        Ok(()) => {}
+        Err(err) => {
+            println!("Error!\n  {}", err);
+            return;
+        }
+    }
+
+    // 5. Construct (Desugared Typed AST -> IR)
     let ir_ = ast.to_ir();
 
-    // 4. Emit (IR -> C source)
+    // 6. Emit (IR -> C source)
     let mut writer = std::io::LineWriter::new(Vec::new());
 
     ir_.emit_c_prototype(&mut writer).unwrap();
@@ -334,7 +366,7 @@ fn compile(
         return;
     }
 
-    // 5. Invoke GCC (C source -> Executable)
+    // 7. Invoke GCC (C source -> Executable)
     // TODO(Brooke): This is all very specific to windows msys2...
     // TODO(Brooke): So much .unwrap here omg please make this good and not a hack!
     let gcc_path = gcc_path.unwrap();

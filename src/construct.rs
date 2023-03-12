@@ -5,7 +5,16 @@
 use std::collections::HashMap;
 
 use super::ast::*;
+use super::internal_error::*;
 use super::ir;
+
+#[derive(Debug)]
+pub enum ConstructErrorKind {}
+
+#[derive(Debug)]
+pub struct ConstructError {
+    pub kind: ConstructErrorKind,
+}
 
 struct BlockConstructor {
     locator: ir::BlockLocator,
@@ -31,11 +40,12 @@ impl BlockConstructor {
         }
     }
     fn construct(self) -> ir::Block {
-        assert!(self.block_terminator.is_some());
         ir::Block {
             locator: self.locator,
             assignments: self.assignments,
-            block_terminator: self.block_terminator.unwrap(),
+            block_terminator: self.block_terminator.rexc_unwrap(
+                "Somehow .construct() was called on a BlockConstructor that has no terminator!",
+            ),
         }
     }
 }
@@ -52,10 +62,11 @@ impl FunctionConstructor {
         }
     }
     fn construct(self) -> ir::Function {
-        assert!(self.returns.is_some());
         ir::Function {
             name: self.name,
-            returns: self.returns.unwrap(),
+            returns: self.returns.rexc_unwrap(
+                "Somehow .construct() was called on a FunctionConstructor that has no return type!",
+            ),
             parameters: self.parameters,
             body: self.body.into_iter().map(|b| b.construct()).collect(),
         }
@@ -91,17 +102,17 @@ impl FunctionConstructor {
     }
     fn add_return(&mut self, block: ir::BlockLocator, type_: ir::Type, var: ir::Variable) {
         let block = self.get_block(block);
-        assert!(block.block_terminator.is_none());
+        rexc_assert(block.block_terminator.is_none());
         block.block_terminator = Some(ir::BlockTerminator::Return(var, type_));
     }
     fn add_unfilled_branch(&mut self, from_block: ir::BlockLocator) {
         let from_block = self.get_block(from_block);
-        assert!(from_block.block_terminator.is_none());
+        rexc_assert(from_block.block_terminator.is_none());
         from_block.block_terminator = Some(ir::BlockTerminator::Branch(None));
     }
     fn fill_unfilled_branch(&mut self, from_block: ir::BlockLocator, to_block: ir::BlockLocator) {
         let from_block = self.get_block(from_block);
-        assert!(matches!(
+        rexc_assert(matches!(
             from_block.block_terminator,
             Some(ir::BlockTerminator::Branch(None))
         ));
@@ -109,7 +120,7 @@ impl FunctionConstructor {
     }
     fn add_unconditional_jump(&mut self, from_block: ir::BlockLocator, to_block: ir::BlockLocator) {
         let from_block = self.get_block(from_block);
-        assert!(from_block.block_terminator.is_none());
+        rexc_assert(from_block.block_terminator.is_none());
         from_block.block_terminator = Some(ir::BlockTerminator::Branch(Some(to_block)));
     }
     fn add_conditional_jump(
@@ -121,7 +132,7 @@ impl FunctionConstructor {
         condition_type: ir::Type,
     ) {
         let from_block = self.get_block(from_block);
-        assert!(from_block.block_terminator.is_none());
+        rexc_assert(from_block.block_terminator.is_none());
         from_block.block_terminator = Some(ir::BlockTerminator::ConditionalBranch(
             to_block,
             else_block,
@@ -159,11 +170,14 @@ impl Expression {
             Expression::Variable(name) => {
                 let mut params_with_name = ctor.parameters.iter().filter(|(_, s)| s == &name);
                 let param = params_with_name.next();
-                assert!(params_with_name.next().is_none());
+                rexc_assert(params_with_name.next().is_none());
                 if let Some((_, param)) = param {
                     ir::Rhs::Parameter(String::from(param))
                 } else {
-                    let var = ctor.variable_map.get(&name).unwrap();
+                    let var = ctor
+                        .variable_map
+                        .get(&name)
+                        .rexc_unwrap("Somehow a parameter was never added to the variable map!");
                     ir::Rhs::Variable(*var)
                 }
             }
@@ -172,10 +186,18 @@ impl Expression {
                 let (right_type, right) = *right;
                 // Create SSA assignment chain for left expression
                 let left_rhs = left.to_ir(ctor, block);
-                let left = ctor.add_assignment(block, left_type.unwrap().to_ir(), left_rhs);
+                let left = ctor.add_assignment(
+                    block,
+                    left_type.rexc_unwrap("Somehow the left side of an operation passed the typechecker without having a type filled in!").to_ir(),
+                    left_rhs
+                );
                 // Create SSA assignment chain for right expression
                 let right_rhs = right.to_ir(ctor, block);
-                let right = ctor.add_assignment(block, right_type.unwrap().to_ir(), right_rhs);
+                let right = ctor.add_assignment(
+                    block,
+                    right_type.rexc_unwrap("Somehow the right side of an operation passed the typechecker without having a type filled in!").to_ir(),
+                    right_rhs
+                );
                 // Return new RHS which uses those chains
                 ir::Rhs::Operation(operation, left, right)
             }
@@ -208,12 +230,13 @@ fn body_to_ir(
                 rhs: (_type, rhs),
             }) => {
                 let ir_rhs = rhs.to_ir(ctor, current_block);
-                let var = ctor.variable_map.get(&lhs).unwrap();
+                let var = ctor.variable_map.get(&lhs)
+                    .rexc_unwrap("Somehow a bad variable assignment passed the typechecker without UnboundVariable being thrown!");
 
                 ctor.add_reassignment(current_block, *var, ir_rhs);
             }
             Statement::Return((type_, expression)) => {
-                let type_ = type_.unwrap();
+                let type_ = type_.rexc_unwrap("Somehow a return statement passed the typechecker without its type being filled in!");
                 let rhs = expression.to_ir(ctor, current_block);
                 let index = ctor.add_assignment(current_block, type_.to_ir(), rhs);
                 ctor.add_return(current_block, type_.to_ir(), index);
@@ -225,7 +248,7 @@ fn body_to_ir(
                 condition: (type_, condition),
                 body: if_body,
             }) => {
-                let type_ = type_.unwrap();
+                let type_ = type_.rexc_unwrap("Somehow an if condition passed the typechecker without its type being filled in!");
                 let rhs = condition.to_ir(ctor, current_block);
                 let index = ctor.add_assignment(current_block, type_.to_ir(), rhs);
 
@@ -324,14 +347,14 @@ fn body_to_ir(
                 current_block = post_loop_block;
             }
             Statement::Break => {
-                break_blocks.as_mut().unwrap().push(current_block);
+                break_blocks.as_mut().rexc_unwrap("Somehow a break statement was reached wihout a `break_blocks` argument being passed to `body_to_ir`.").push(current_block);
                 ctor.add_unfilled_branch(current_block);
                 // If we don't break we might continue the loop and start constructing
                 // unreachable post-break code!
                 break;
             }
             Statement::Print((type_, expression)) => {
-                let type_ = type_.unwrap();
+                let type_ = type_.rexc_unwrap("Somehow a print statement passed the typechecker without its type being filled in!");
                 let prelude_function_name = String::from(match type_ {
                     Type::Int => "print_int",
                     Type::Bool => "print_bool",
