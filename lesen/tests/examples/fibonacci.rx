@@ -1,0 +1,16 @@
+function main() -> int {
+    var a: int = 1
+    var b: int = 1
+    print(a)
+    loop {
+        print(b)
+        var sum: int = a + b
+        a = b
+        b = sum
+
+        if b > 100 {
+            break
+        }
+    }
+    return 0
+}
