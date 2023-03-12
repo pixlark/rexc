@@ -37,6 +37,12 @@ pub struct MakeVariable {
 }
 
 #[derive(Debug)]
+pub struct SetVariable {
+    pub lhs: String,
+    pub rhs: InferredTypedExpression,
+}
+
+#[derive(Debug)]
 pub struct If {
     pub condition: InferredTypedExpression,
     pub body: Vec<Statement>,
@@ -45,8 +51,11 @@ pub struct If {
 #[derive(Debug)]
 pub enum Statement {
     MakeVariable(MakeVariable),
+    SetVariable(SetVariable),
     Return(InferredTypedExpression),
     If(If),
+    Loop(Vec<Statement>),
+    Break,
     // NOTE: Temporary, eventually print will be function in the standard
     //       library. Right now it's built-in just so we can get up and running
     //       with end-to-end tests.

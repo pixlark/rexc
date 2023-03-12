@@ -43,23 +43,30 @@ pub enum Rhs {
     FunctionCall(String, Vec<Variable>),
 }
 
-pub struct Assignment {
-    pub type_: Type,
-    pub lhs: Option<Variable>,
-    pub rhs: Rhs,
+pub enum Step {
+    NewAssignment(TypedVariable, Rhs),
+    /// Variable assignment makes this IR not actually SSA. However, the biggest reason
+    /// we're targeting an SSA-like format is so that we can one day emit LLVM. Thankfully,
+    /// LLVM has an automatic way of dealing with mutable variables, so we don't have to do
+    /// dominance frontier SSA calculations ourselves. Instead, we just let ourselves mutate
+    /// variables, easy-peasy.
+    Assignment(Variable, Rhs),
+    Discarded(Rhs),
 }
 
 pub type TypedVariable = (Type, Variable);
 
 pub enum BlockTerminator {
-    Branch(BlockLocator),
+    /// Branch terminators spend some of their time "unfilled" during IR construction
+    /// because some block locators aren't known until later.
+    Branch(Option<BlockLocator>),
     ConditionalBranch(BlockLocator, BlockLocator, TypedVariable),
     Return(Variable, Type),
 }
 
 pub struct Block {
     pub locator: BlockLocator,
-    pub assignments: Vec<Assignment>,
+    pub assignments: Vec<Step>,
     pub block_terminator: BlockTerminator,
 }
 

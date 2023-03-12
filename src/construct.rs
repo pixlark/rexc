@@ -9,7 +9,7 @@ use super::ir;
 
 struct BlockConstructor {
     locator: ir::BlockLocator,
-    assignments: Vec<ir::Assignment>,
+    assignments: Vec<ir::Step>,
     block_terminator: Option<ir::BlockTerminator>,
 }
 
@@ -79,21 +79,38 @@ impl FunctionConstructor {
 
         let block = self.get_block(block);
 
-        block.assignments.push(ir::Assignment {
-            type_,
-            lhs: Some(var),
-            rhs,
-        });
+        block
+            .assignments
+            .push(ir::Step::NewAssignment((type_, var), rhs));
 
         var
+    }
+    fn add_reassignment(&mut self, block: ir::BlockLocator, lhs: ir::Variable, rhs: ir::Rhs) {
+        let block = self.get_block(block);
+        block.assignments.push(ir::Step::Assignment(lhs, rhs));
     }
     fn add_return(&mut self, block: ir::BlockLocator, type_: ir::Type, var: ir::Variable) {
         let block = self.get_block(block);
         assert!(block.block_terminator.is_none());
         block.block_terminator = Some(ir::BlockTerminator::Return(var, type_));
     }
+    fn add_unfilled_branch(&mut self, from_block: ir::BlockLocator) {
+        let from_block = self.get_block(from_block);
+        assert!(from_block.block_terminator.is_none());
+        from_block.block_terminator = Some(ir::BlockTerminator::Branch(None));
+    }
+    fn fill_unfilled_branch(&mut self, from_block: ir::BlockLocator, to_block: ir::BlockLocator) {
+        let from_block = self.get_block(from_block);
+        assert!(matches!(
+            from_block.block_terminator,
+            Some(ir::BlockTerminator::Branch(None))
+        ));
+        from_block.block_terminator = Some(ir::BlockTerminator::Branch(Some(to_block)));
+    }
     fn add_unconditional_jump(&mut self, from_block: ir::BlockLocator, to_block: ir::BlockLocator) {
-        unimplemented!();
+        let from_block = self.get_block(from_block);
+        assert!(from_block.block_terminator.is_none());
+        from_block.block_terminator = Some(ir::BlockTerminator::Branch(Some(to_block)));
     }
     fn add_conditional_jump(
         &mut self,
@@ -119,11 +136,7 @@ impl FunctionConstructor {
     ) {
         let block = self.get_block(block);
         let rhs = ir::Rhs::FunctionCall(name, arguments);
-        block.assignments.push(ir::Assignment {
-            type_: ir::Type::Void,
-            lhs: None,
-            rhs,
-        });
+        block.assignments.push(ir::Step::Discarded(rhs));
     }
 }
 
@@ -175,7 +188,11 @@ struct BodyInformation {
     ending_block: ir::BlockLocator,
 }
 
-fn body_to_ir(body: Vec<Statement>, ctor: &mut FunctionConstructor) -> BodyInformation {
+fn body_to_ir(
+    body: Vec<Statement>,
+    ctor: &mut FunctionConstructor,
+    break_blocks: &mut Option<&mut Vec<ir::BlockLocator>>,
+) -> BodyInformation {
     let starting_block = ctor.add_block();
     let mut current_block = starting_block;
 
@@ -185,6 +202,15 @@ fn body_to_ir(body: Vec<Statement>, ctor: &mut FunctionConstructor) -> BodyInfor
                 let ir_rhs = rhs.to_ir(ctor, current_block);
                 let index = ctor.add_assignment(current_block, type_.to_ir(), ir_rhs);
                 ctor.variable_map.insert(lhs, index);
+            }
+            Statement::SetVariable(SetVariable {
+                lhs,
+                rhs: (_type, rhs),
+            }) => {
+                let ir_rhs = rhs.to_ir(ctor, current_block);
+                let var = ctor.variable_map.get(&lhs).unwrap();
+
+                ctor.add_reassignment(current_block, *var, ir_rhs);
             }
             Statement::Return((type_, expression)) => {
                 let type_ = type_.unwrap();
@@ -203,11 +229,12 @@ fn body_to_ir(body: Vec<Statement>, ctor: &mut FunctionConstructor) -> BodyInfor
                 let rhs = condition.to_ir(ctor, current_block);
                 let index = ctor.add_assignment(current_block, type_.to_ir(), rhs);
 
-                // Construct body of if statement, which can be an arbitrary number of block
+                // Construct body of if statement, which can be an arbitrary number of blocks
                 let BodyInformation {
                     starting_block: body_starting_block,
                     ending_block: body_ending_block,
-                } = body_to_ir(if_body, ctor);
+                } = body_to_ir(if_body, ctor, break_blocks);
+                // If statement don't have `break`s
                 let post_if_block = ctor.add_block();
 
                 // b0:
@@ -229,18 +256,79 @@ fn body_to_ir(body: Vec<Statement>, ctor: &mut FunctionConstructor) -> BodyInfor
                     type_.to_ir(),
                 );
 
-                let body_ending_block = ctor.get_block(body_ending_block);
-                if !matches!(
-                    body_ending_block.block_terminator,
-                    Some(ir::BlockTerminator::Return(_, _))
-                ) {
-                    // If the if body's very last block doesn't *return*, then
-                    // it needs to jump back to after the if block.
-                    body_ending_block.block_terminator =
-                        Some(ir::BlockTerminator::Branch(post_if_block));
+                match ctor.get_block(body_ending_block).block_terminator {
+                    None => {
+                        // If the if body's very last block doesn't terminate, then
+                        // it needs to jump forwards to after the if block.
+                        ctor.add_unconditional_jump(body_ending_block, post_if_block);
+                    }
+                    Some(ir::BlockTerminator::Branch(None)) => {
+                        // Unfilled branches are left in the terminator position
+                        // by `break` statements, because they can only be filled
+                        // once the loop body is fully constructed.
+                    }
+                    Some(ir::BlockTerminator::Return(..)) => {
+                        // Return statements make the following code unreachable,
+                        // so when there's a return statement we don't bother trying
+                        // to add an additional goto to reach the next block
+                    }
+                    Some(ir::BlockTerminator::Branch(Some(..))) => {
+                        panic!("Somehow the final block in an if-body has a filled branch already added!");
+                    }
+                    Some(ir::BlockTerminator::ConditionalBranch(..)) => {
+                        panic!(
+                            "Somehow the final block in an if-body had a condbranch already added!"
+                        );
+                    }
                 }
 
                 current_block = post_if_block;
+            }
+            Statement::Loop(body) => {
+                let mut break_blocks = Vec::new();
+
+                // Construct body of loop statement, which can be an arbitrary number of blocks
+                let BodyInformation {
+                    starting_block: body_starting_block,
+                    ending_block: body_ending_block,
+                } = body_to_ir(body, ctor, &mut Some(&mut break_blocks));
+
+                ctor.add_unconditional_jump(current_block, body_starting_block);
+
+                let post_loop_block = ctor.add_block();
+                for break_block in break_blocks {
+                    ctor.fill_unfilled_branch(break_block, post_loop_block);
+                }
+
+                match ctor.get_block(body_ending_block).block_terminator {
+                    None => {
+                        // If the loop body's very last block doesn't terminate, then
+                        // it needs to jump back to the beginning of the loop.
+                        ctor.add_unconditional_jump(body_ending_block, body_starting_block);
+                    }
+                    Some(ir::BlockTerminator::Return(..)) => {
+                        // Return statements mean the loop will not continue,
+                        // so when there's a return statement we don't bother trying
+                        // to add an additional goto to reset the loop
+                    }
+                    Some(ir::BlockTerminator::Branch(..)) => {
+                        // If our loop ends in a branch (would be pointless, but
+                        // still is accepted code), then we don't bother trying to
+                        // add an additional goto to reset the loop
+                    }
+                    Some(ir::BlockTerminator::ConditionalBranch(..)) => {
+                        panic!("Somehow the final block in a loop-body had a condbranch already added!");
+                    }
+                }
+
+                current_block = post_loop_block;
+            }
+            Statement::Break => {
+                break_blocks.as_mut().unwrap().push(current_block);
+                ctor.add_unfilled_branch(current_block);
+                // If we don't break we might continue the loop and start constructing
+                // unreachable post-break code!
+                break;
             }
             Statement::Print((type_, expression)) => {
                 let type_ = type_.unwrap();
@@ -273,7 +361,7 @@ impl Function {
             .map(|(t, s)| (t.to_ir(), s))
             .collect();
 
-        body_to_ir(self.body, &mut ctor);
+        body_to_ir(self.body, &mut ctor, &mut None);
 
         ctor.construct()
     }

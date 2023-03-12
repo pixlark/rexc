@@ -159,8 +159,31 @@ fn print_(input: &str) -> nom::IResult<&str, ast::Statement> {
     .parse(input)
 }
 
+fn loop_(input: &str) -> nom::IResult<&str, ast::Statement> {
+    nom::preceded(ws(nom::tag("loop")), body)
+        .map(|body| ast::Statement::Loop(body))
+        .parse(input)
+}
+
+fn break_(input: &str) -> nom::IResult<&str, ast::Statement> {
+    ws(nom::tag("break"))
+        .map(|_break| ast::Statement::Break)
+        .parse(input)
+}
+
+fn var_set(input: &str) -> nom::IResult<&str, ast::Statement> {
+    nom::tuple((ws(identifier), ws(nom::char('=')), expression))
+        .map(|(ident, _equals, expression)| {
+            ast::Statement::SetVariable(ast::SetVariable {
+                lhs: ident,
+                rhs: (None, expression),
+            })
+        })
+        .parse(input)
+}
+
 fn statement(input: &str) -> nom::IResult<&str, ast::Statement> {
-    nom::alt((var_decl, return_, if_, print_)).parse(input)
+    nom::alt((var_decl, return_, if_, loop_, break_, print_, var_set)).parse(input)
 }
 
 fn body(input: &str) -> nom::IResult<&str, Vec<ast::Statement>> {

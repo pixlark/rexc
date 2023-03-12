@@ -13,6 +13,7 @@ pub enum TypeErrorKind {
     BadReturnType,
     IncompatibleOperands(ir::Operation),
     UnboundVariable(String),
+    AssignedWrongTypeToVariable(String),
 }
 
 #[derive(Debug)]
@@ -40,6 +41,13 @@ impl std::fmt::Display for TypeError {
             }
             TypeErrorKind::UnboundVariable(var) => {
                 write!(f, "Variable {} is used but was never bound.", var)
+            }
+            TypeErrorKind::AssignedWrongTypeToVariable(var) => {
+                write!(
+                    f,
+                    "Tried to assign an expression of the wrong type to variable {}",
+                    var
+                )
             }
         }
     }
@@ -116,6 +124,19 @@ impl ast::Statement {
                 }
                 type_map.insert(lhs.clone(), *type_);
             }
+            ast::Statement::SetVariable(ast::SetVariable {
+                lhs,
+                rhs: (unfilled_type, rhs),
+            }) => {
+                let lhs_type = *type_map.get(lhs).unwrap();
+                let rhs_type = rhs.typecheck(type_map)?;
+                if lhs_type != rhs_type {
+                    return Err(TypeError {
+                        kind: TypeErrorKind::AssignedWrongTypeToVariable(lhs.clone()),
+                    });
+                }
+                *unfilled_type = Some(rhs_type);
+            }
             ast::Statement::Return((unfilled_type, expression)) => {
                 let infer_type = expression.typecheck(type_map)?;
                 if infer_type != function_returns {
@@ -136,6 +157,12 @@ impl ast::Statement {
                     statement.typecheck(type_map, function_returns)?;
                 }
             }
+            ast::Statement::Loop(body) => {
+                for statement in body {
+                    statement.typecheck(type_map, function_returns);
+                }
+            }
+            ast::Statement::Break => {}
             ast::Statement::Print((unfilled_type, expression)) => {
                 let infer_type = expression.typecheck(type_map)?;
                 *unfilled_type = Some(infer_type);

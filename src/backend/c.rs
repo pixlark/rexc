@@ -152,7 +152,7 @@ impl<W: Write> EmitC<W> for BlockTerminator {
         match self {
             BlockTerminator::Branch(to) => {
                 writer.string("goto ")?;
-                writer.label(*to)?;
+                writer.label(to.unwrap())?;
                 writer.string(";")?;
                 writer.newline()?;
             }
@@ -185,18 +185,29 @@ impl<W: Write> EmitC<W> for Block {
         writer.newline()?;
         // Block consists of assignments without control flow
         for assignment in self.assignments.iter() {
-            if !matches!(assignment.type_, Type::Void) {
-                // Special case - void functions can't have their results assigned to a variable in C
-                // TODO(Brooke): The connection between `Void` and `lhs` existing should be typed - i.e.
-                //               it shouldn't require a `.unwrap()`.
-                writer.emit(&assignment.type_)?;
-                writer.space()?;
-                writer.variable(assignment.lhs.unwrap())?;
-                writer.string(" = ")?;
+            match assignment {
+                Step::NewAssignment((type_, var), rhs) => {
+                    writer.emit(type_)?;
+                    writer.space()?;
+                    writer.variable(*var)?;
+                    writer.string(" = ")?;
+                    writer.emit(rhs)?;
+                    writer.string(";")?;
+                    writer.newline()?;
+                }
+                Step::Assignment(var, rhs) => {
+                    writer.variable(*var)?;
+                    writer.string(" = ")?;
+                    writer.emit(rhs)?;
+                    writer.string(";")?;
+                    writer.newline()?;
+                }
+                Step::Discarded(rhs) => {
+                    writer.emit(rhs)?;
+                    writer.string(";")?;
+                    writer.newline()?;
+                }
             }
-            writer.emit(&assignment.rhs)?;
-            writer.string(";")?;
-            writer.newline()?;
         }
         // Blocks ends with either a jump to another block, or a return
         // from the function

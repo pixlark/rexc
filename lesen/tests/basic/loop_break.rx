@@ -1,0 +1,11 @@
+function main() -> int {
+    var x : int = 0
+    loop {
+        if x {
+            break
+        }
+        print(x)
+        x = x + 1
+    }
+    return 0
+}
