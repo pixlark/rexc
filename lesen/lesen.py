@@ -36,7 +36,7 @@ def validate_generate_args(args):
     if not os.path.isdir(args["directory"]):
         raise Exception(f"{args['directory']} is not a directory.")
     if not os.path.isfile(args["source"]):
-        raise Exception(f"{args['file']} is not a directory.")
+        raise Exception(f"{args['source']} is not a file.")
     valid_test_kinds = ["emit", "exitcode", "stdout"]
     if args["kind"] not in valid_test_kinds:
         raise Exception(f"{args['kind']} is not a generate-able test kind (one of: {valid_test_kinds})")
