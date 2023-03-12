@@ -53,7 +53,35 @@ impl std::fmt::Display for TypeError {
     }
 }
 
-pub type TypeMap = HashMap<String, ast::Type>;
+pub struct TypeMap(Vec<HashMap<String, ast::Type>>);
+
+impl TypeMap {
+    fn new() -> TypeMap {
+        TypeMap(Vec::new())
+    }
+    fn get(&self, name: &str) -> Option<&ast::Type> {
+        for scope in self.0.iter().rev() {
+            if let Some(t) = scope.get(name) {
+                return Some(t);
+            }
+        }
+        None
+    }
+    fn bind(&mut self, name: String, type_: ast::Type) -> Option<()> {
+        let scope = self.0.last_mut()?;
+        if scope.get(&name).is_some() {
+            return None;
+        }
+        scope.insert(name, type_);
+        Some(())
+    }
+    fn push_scope(&mut self) {
+        self.0.push(HashMap::new());
+    }
+    fn pop_scope(&mut self) {
+        self.0.pop();
+    }
+}
 
 impl ir::Operation {
     fn accepts(&self, left: &ast::Type, right: &ast::Type) -> bool {
@@ -147,7 +175,7 @@ impl ast::Statement {
                         kind: TypeErrorKind::BadVariableDeclarationType(lhs.clone()),
                     });
                 }
-                type_map.insert(lhs.clone(), *type_);
+                type_map.bind(lhs.clone(), *type_);
             }
             ast::Statement::SetVariable(ast::SetVariable {
                 lhs,
@@ -178,14 +206,19 @@ impl ast::Statement {
                 let infer_type = expression.typecheck(type_map)?;
                 // TODO: This should give an error if the condition expression isn't a bool
                 *unfilled_type = Some(infer_type);
+
+                type_map.push_scope();
                 for statement in body {
                     statement.typecheck(type_map, function_returns)?;
                 }
+                type_map.pop_scope();
             }
             ast::Statement::Loop(body) => {
+                type_map.push_scope();
                 for statement in body {
                     statement.typecheck(type_map, function_returns)?;
                 }
+                type_map.pop_scope();
             }
             ast::Statement::Break => {}
             ast::Statement::Print((unfilled_type, expression)) => {
@@ -200,9 +233,11 @@ impl ast::Statement {
 impl ast::Function {
     pub fn typecheck(&mut self) -> Result<(), TypeError> {
         let mut type_map = TypeMap::new();
+        type_map.push_scope();
 
-        // Add parameter types
-        type_map.extend(self.parameters.iter().map(|(t, s)| (s.clone(), *t)));
+        for (t, s) in self.parameters.iter() {
+            type_map.bind(s.clone(), *t);
+        }
 
         for statement in self.body.iter_mut() {
             statement.typecheck(&mut type_map, self.returns)?;
