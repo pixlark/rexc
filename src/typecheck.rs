@@ -125,7 +125,6 @@ impl ir::Operation {
 }
 
 impl ast::Expression {
-    // TODO(Brooke): This should not be &mut
     fn typecheck(&mut self, type_map: &mut TypeMap) -> Result<ast::Type, TypeError> {
         match self {
             ast::Expression::Literal(lit) => match lit {
