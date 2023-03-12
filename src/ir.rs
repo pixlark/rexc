@@ -33,6 +33,15 @@ pub enum Literal {
 #[derive(Copy, Clone, Debug)]
 pub enum Operation {
     Add,
+    Subtract,
+    Multiply,
+    Divide,
+    Equals,
+    NotEquals,
+    LessThan,
+    GreaterThan,
+    LessThanOrEqualTo,
+    GreaterThanOrEqualTo,
 }
 
 pub enum Rhs {

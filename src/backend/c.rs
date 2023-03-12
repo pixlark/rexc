@@ -95,9 +95,18 @@ impl<W: Write> EmitC<W> for Rhs {
                 writer.string("(")?;
                 writer.variable(*left)?;
                 writer.space()?;
-                match *op {
-                    Operation::Add => writer.string("+"),
-                }?;
+                writer.string(match *op {
+                    Operation::Add => "+",
+                    Operation::Subtract => "-",
+                    Operation::Multiply => "*",
+                    Operation::Divide => "/",
+                    Operation::Equals => "==",
+                    Operation::NotEquals => "!=",
+                    Operation::LessThan => "<",
+                    Operation::GreaterThan => ">",
+                    Operation::LessThanOrEqualTo => "<=",
+                    Operation::GreaterThanOrEqualTo => ">=",
+                })?;
                 writer.space()?;
                 writer.variable(*right)?;
                 writer.string(")")?;

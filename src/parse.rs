@@ -86,24 +86,79 @@ fn atom(input: &str) -> nom::IResult<&str, ast::Expression> {
     ))(input)
 }
 
+/// TODO(Brooke): Clean this up, it's probably more complicated than it needs to be.
 macro_rules! left_assoc_operator {
-    ($sep:expr, $sub:expr, $op:expr) => {
-        (nom::separated_list1($sep, $sub).map(|vec| {
-            vec.into_iter()
-                .reduce(|a, b| {
-                    ast::Expression::Operation($op, Box::new((None, a)), Box::new((None, b)))
-                })
-                .unwrap()
-        }))
+    ($name:ident, $sep:expr, $sub: expr) => {
+        fn $name(input: &str) -> nom::IResult<&str, ast::Expression> {
+            let (i, list) = {
+                let mut list = Vec::new();
+                let (mut i, start) = $sub.parse(input)?;
+                list.push((None, start));
+                loop {
+                    match nom::pair($sep, $sub).map(|(a, b)| (Some(a), b)).parse(i) {
+                        Ok((i_, pair)) => {
+                            i = i_;
+                            list.push(pair);
+                        }
+                        Err(..) => break,
+                    }
+                }
+                (i, list)
+            };
+            let mut iter = list.into_iter();
+            let mut expr = iter.next().unwrap().1;
+            for (op, id) in iter {
+                expr = ast::Expression::Operation(
+                    op.unwrap(),
+                    Box::new((None, expr)),
+                    Box::new((None, id)),
+                );
+            }
+            Ok((i, expr))
+        }
     };
 }
 
-fn additive_operators(input: &str) -> nom::IResult<&str, ast::Expression> {
-    left_assoc_operator!(ws(nom::char('+')).map(|_| ()), atom, ir::Operation::Add).parse(input)
+left_assoc_operator! {
+    multiplicative_operators,
+    nom::alt((
+        ws(nom::char('*')).map(|_| ir::Operation::Multiply),
+        ws(nom::char('/')).map(|_| ir::Operation::Divide)
+    )),
+    atom
+}
+
+left_assoc_operator! {
+    additive_operators,
+    nom::alt((
+        ws(nom::char('+')).map(|_| ir::Operation::Add),
+        ws(nom::char('-')).map(|_| ir::Operation::Subtract)
+    )),
+    multiplicative_operators
+}
+
+left_assoc_operator! {
+    comparative_operators,
+    nom::alt((
+        ws(nom::tag("<=")).map(|_| ir::Operation::LessThanOrEqualTo),
+        ws(nom::tag(">=")).map(|_| ir::Operation::GreaterThanOrEqualTo),
+        ws(nom::char('<')).map(|_| ir::Operation::LessThan),
+        ws(nom::char('>')).map(|_| ir::Operation::GreaterThan),
+    )),
+    additive_operators
+}
+
+left_assoc_operator! {
+    equality_operators,
+    nom::alt((
+        ws(nom::tag("==")).map(|_| ir::Operation::Equals),
+        ws(nom::tag("!=")).map(|_| ir::Operation::NotEquals),
+    )),
+    comparative_operators
 }
 
 fn expression(input: &str) -> nom::IResult<&str, ast::Expression> {
-    additive_operators(input)
+    equality_operators.parse(input)
 }
 
 fn type_annotation(input: &str) -> nom::IResult<&str, ast::Type> {
@@ -231,17 +286,5 @@ pub fn function(input: &str) -> nom::IResult<&str, ast::Function> {
 #[test]
 fn test_parse() {
     println!();
-    println!(
-        "{:#?}",
-        function(
-            "\
-function foo(x: int, b: bool) -> int {
-    if b {
-        var y : int = x + 1
-        return y
-    }
-}
-"
-        )
-    );
+    println!("{:#?}", expression("5 * 2 + 3 == 1 - 2 > 5 / 3"));
 }

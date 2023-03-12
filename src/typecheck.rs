@@ -58,13 +58,38 @@ pub type TypeMap = HashMap<String, ast::Type>;
 impl ir::Operation {
     fn accepts(&self, left: &ast::Type, right: &ast::Type) -> bool {
         match self {
-            Self::Add => matches!((left, right), (ast::Type::Int, ast::Type::Int)),
+            Self::Add
+            | Self::Subtract
+            | Self::Multiply
+            | Self::Divide
+            | Self::LessThan
+            | Self::GreaterThan
+            | Self::LessThanOrEqualTo
+            | Self::GreaterThanOrEqualTo => {
+                matches!((left, right), (ast::Type::Int, ast::Type::Int))
+            }
+            Self::Equals | Self::NotEquals => matches!(
+                (left, right),
+                (ast::Type::Int, ast::Type::Int) | (ast::Type::Bool, ast::Type::Bool)
+            ),
         }
     }
     fn produce(&self, lhs: &ast::Type, rhs: &ast::Type) -> ast::Type {
         match self {
-            Self::Add => match (lhs, rhs) {
+            Self::Add | Self::Subtract | Self::Multiply | Self::Divide => match (lhs, rhs) {
                 (ast::Type::Int, ast::Type::Int) => ast::Type::Int,
+                _ => unreachable!(),
+            },
+            Self::LessThan
+            | Self::GreaterThan
+            | Self::LessThanOrEqualTo
+            | Self::GreaterThanOrEqualTo => match (lhs, rhs) {
+                (ast::Type::Int, ast::Type::Int) => ast::Type::Bool,
+                _ => unreachable!(),
+            },
+            Self::Equals | Self::NotEquals => match (lhs, rhs) {
+                (ast::Type::Int, ast::Type::Int) => ast::Type::Bool,
+                (ast::Type::Bool, ast::Type::Bool) => ast::Type::Bool,
                 _ => unreachable!(),
             },
         }
@@ -159,7 +184,7 @@ impl ast::Statement {
             }
             ast::Statement::Loop(body) => {
                 for statement in body {
-                    statement.typecheck(type_map, function_returns);
+                    statement.typecheck(type_map, function_returns)?;
                 }
             }
             ast::Statement::Break => {}
