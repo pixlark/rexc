@@ -1,5 +1,5 @@
 function main() -> int {
-    var x : int = 0
+    var x: int = 0
     loop {
         if x {
             break

@@ -1,6 +1,6 @@
 function main() -> int {
-    var b1 : bool = true
-    var b2 : bool = false
+    var b1: bool = true
+    var b2: bool = false
     if b1 {
         print(b1)
     }
