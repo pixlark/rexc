@@ -290,15 +290,18 @@ function foo(x: int, b: bool) -> int {
     }
 }
 
+use bitflags::bitflags;
+
 use backend::c::EmitC;
 
-// TODO(Brooke): Make a CompileFlags instead of passing in bool
-fn compile(
-    path: std::path::PathBuf,
-    gcc_path: Option<String>,
-    show_emitted: bool,
-    emit_only: bool,
-) {
+bitflags! {
+    struct CompileFlags: u32 {
+        const SHOW_EMITTED = 0b00000001;
+        const EMIT_ONLY    = 0b00000010;
+    }
+}
+
+fn compile(path: std::path::PathBuf, gcc_path: Option<String>, flags: CompileFlags) {
     let mut path_ok = false;
     if let Some(ext) = path.extension() {
         if ext == "rx" {
@@ -355,14 +358,14 @@ fn compile(
 
     // TODO(Brooke): Only emit to string if we're printing the emitted code, otherwise
     //               emit directly to the `emit_path` file.
-    if show_emitted {
-        println!("```\n{}\n```\n", emitted_c);
+    if flags.contains(CompileFlags::SHOW_EMITTED) {
+        println!("Emitted Code:\n```\n{}\n```", emitted_c);
     }
 
     let emit_path = path.with_extension("rx.c");
     std::fs::write(&emit_path, emitted_c).unwrap();
 
-    if emit_only {
+    if flags.contains(CompileFlags::EMIT_ONLY) {
         return;
     }
 
@@ -412,24 +415,31 @@ fn main() {
     match matches.subcommand() {
         Some(("compile", sub_matches)) => {
             let source = sub_matches.get_one::<String>("source");
-            let show_emitted = sub_matches
-                .get_one::<bool>("show-emitted")
-                .map_or(false, |b| *b);
-            let emit_only = sub_matches
-                .get_one::<bool>("emit-only")
-                .map_or(false, |b| *b);
+            let mut flags = CompileFlags::empty();
+
+            flags.set(
+                CompileFlags::SHOW_EMITTED,
+                sub_matches
+                    .get_one::<bool>("show-emitted")
+                    .map_or(false, |b| *b),
+            );
+            flags.set(
+                CompileFlags::EMIT_ONLY,
+                sub_matches
+                    .get_one::<bool>("emit-only")
+                    .map_or(false, |b| *b),
+            );
 
             let gcc_path = sub_matches.get_one::<String>("gcc");
 
-            if !emit_only && gcc_path.is_none() {
+            if !flags.contains(CompileFlags::EMIT_ONLY) && gcc_path.is_none() {
                 gcc_path_err.exit();
             }
 
             compile(
                 std::path::PathBuf::from(source.unwrap()),
                 gcc_path.map(|s| s.clone()),
-                show_emitted,
-                emit_only,
+                flags,
             );
         }
         Some((_, _)) => unreachable!(),
