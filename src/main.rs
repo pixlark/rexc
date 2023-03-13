@@ -26,6 +26,7 @@
 mod ast;
 mod backend;
 mod construct;
+mod desugar;
 mod internal_error;
 mod ir;
 mod parse;
@@ -66,7 +67,7 @@ fn compile(path: std::path::PathBuf, gcc_path: Option<String>, flags: CompileFla
     };
 
     // 2. Desugaring (Sugared Untyped AST -> Desugared Untyped AST)
-    // Not implemented (not yet needed for any constructs)
+    ast.desugar();
 
     // 3. Typecheck (Desugared Untyped AST -> Desugared Typed AST)
     match ast.typecheck() {
