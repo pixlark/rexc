@@ -228,14 +228,8 @@ impl<W: Write> EmitC<W> for Block {
     }
 }
 
-const C_PRELUDE: &str = include_str!("../../prelude/prelude.c");
-
 impl<W: Write> EmitC<W> for Function {
     fn emit_c(&self, writer: &mut LineWriter<W>) -> EmitResult {
-        // TODO(Brooke): Once we can have more than one function per source file, this should
-        //               be moved out of the impl for Function
-        write!(writer, "{}", C_PRELUDE)?;
-
         self.emit_c_header(writer)?;
         writer.string(" {")?;
         writer.newline()?;
@@ -244,6 +238,24 @@ impl<W: Write> EmitC<W> for Function {
         }
         writer.string("}")?;
         writer.newline()?;
+        Ok(())
+    }
+}
+
+const C_PRELUDE: &str = include_str!("../../prelude/prelude.c");
+
+impl<W: Write> EmitC<W> for CompilationUnit {
+    fn emit_c(&self, writer: &mut LineWriter<W>) -> EmitResult {
+        write!(writer, "{}", C_PRELUDE)?;
+
+        for function in self.functions.iter() {
+            function.emit_c_prototype(writer)?;
+        }
+
+        for function in self.functions.iter() {
+            function.emit_c(writer)?;
+        }
+
         Ok(())
     }
 }

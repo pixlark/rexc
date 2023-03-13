@@ -1,12 +1,24 @@
 //! This module defines the abstract syntax tree for the language, which is
 //! the form that our source files take after being parsed.
 
+use std::rc::Rc;
+
 use super::ir;
 
-#[derive(Debug, Copy, Clone, PartialEq, Eq)] // NOTE: Probably temporary while Type is limited to Int
+/// Type is special in our AST because many different
+/// instances of `Type` might point to the same "underlying"
+/// type (for instance a struct). So all non-trivial type
+/// information that represents a shared underlying type
+/// is held behind an `Rc`.
+/// Because of this, it's perfectly acceptable and expected
+/// to call `.clone()` on `Type`s all over the place, because
+/// all you're doing is bumping the reference count on possible
+/// non-trivial type information.
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Type {
     Int,
     Bool,
+    Function(Rc<(Type, Vec<Type>)>),
 }
 
 pub type InferredType = Option<Type>;
@@ -27,6 +39,7 @@ pub enum Expression {
         Box<InferredTypedExpression>,
         Box<InferredTypedExpression>,
     ),
+    FunctionCall(InferredType, String, Vec<InferredTypedExpression>),
 }
 
 #[derive(Debug)]
@@ -68,4 +81,9 @@ pub struct Function {
     pub parameters: Vec<(Type, String)>,
     pub returns: Type,
     pub body: Vec<Statement>,
+}
+
+#[derive(Debug)]
+pub struct File {
+    pub functions: Vec<Function>,
 }

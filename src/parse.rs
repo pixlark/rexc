@@ -86,6 +86,25 @@ fn atom(input: &str) -> nom::IResult<&str, ast::Expression> {
     ))(input)
 }
 
+fn arguments(input: &str) -> nom::IResult<&str, Vec<ast::Expression>> {
+    nom::separated_list0(ws(nom::char(',')), expression).parse(input)
+}
+
+fn function_call(input: &str) -> nom::IResult<&str, ast::Expression> {
+    nom::pair(
+        ws(identifier),
+        nom::delimited(ws(nom::char('(')), arguments, ws(nom::char(')'))),
+    )
+    .map(|(name, arguments)| {
+        ast::Expression::FunctionCall(
+            None,
+            name,
+            arguments.into_iter().map(|expr| (None, expr)).collect(),
+        )
+    })
+    .parse(input)
+}
+
 /// TODO(Brooke): Clean this up, it's probably more complicated than it needs to be.
 macro_rules! left_assoc_operator {
     ($name:ident, $sep:expr, $sub: expr) => {
@@ -125,7 +144,7 @@ left_assoc_operator! {
         ws(nom::char('*')).map(|_| ir::Operation::Multiply),
         ws(nom::char('/')).map(|_| ir::Operation::Divide)
     )),
-    atom
+    nom::alt((function_call, atom))
 }
 
 left_assoc_operator! {
@@ -283,8 +302,44 @@ pub fn function(input: &str) -> nom::IResult<&str, ast::Function> {
     .parse(input)
 }
 
+pub fn file(mut input: &str) -> nom::IResult<&str, ast::File> {
+    let mut functions = Vec::new();
+    loop {
+        let (i, function) = match function.parse(input) {
+            Ok(res) => res,
+            // Kind of a hack!!
+            Err(e) => {
+                if e.is_incomplete()
+                    && ws(nom::eof::<&str, nom::error::Error<&str>>)
+                        .parse(input)
+                        .is_ok()
+                {
+                    break;
+                } else {
+                    return Err(e);
+                }
+            }
+        };
+        functions.push(function);
+        input = i
+    }
+    Ok((input, ast::File { functions }))
+}
+
 #[test]
 fn test_parse() {
     println!();
-    println!("{:#?}", expression("5 * 2 + 3 == 1 - 2 > 5 / 3"));
+    println!(
+        "{:#?}",
+        file(
+            "\
+function main() -> int {
+    return 0
+}
+function foo(x: int) -> bool {
+    return x > 0
+}
+"
+        )
+    );
 }

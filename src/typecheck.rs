@@ -3,9 +3,11 @@
 //! it checks the types as it goes to ensure that all typing in the program is
 //! consistent (no type errors).
 
+use std::collections::HashMap;
+use std::rc::Rc;
+
 use super::ast;
 use super::ir;
-use std::collections::HashMap;
 
 #[derive(Debug)]
 pub enum TypeErrorKind {
@@ -14,6 +16,9 @@ pub enum TypeErrorKind {
     IncompatibleOperands(ir::Operation),
     UnboundVariable(String),
     AssignedWrongTypeToVariable(String),
+    CalledNonFunction(String),
+    WrongArgumentCount(String),
+    WrongArgumentType(String, usize),
 }
 
 #[derive(Debug)]
@@ -49,6 +54,19 @@ impl std::fmt::Display for TypeError {
                     var
                 )
             }
+            TypeErrorKind::CalledNonFunction(var) => {
+                write!(f, "Tried to call {}, which is not a function.", var)
+            }
+            TypeErrorKind::WrongArgumentCount(func) => {
+                write!(f, "Called {} with the wrong number of arguments.", func)
+            }
+            TypeErrorKind::WrongArgumentType(name, arg_index) => {
+                write!(
+                    f,
+                    "Argument #{} in call to {} is the incorrect type.",
+                    arg_index, name
+                )
+            }
         }
     }
 }
@@ -59,10 +77,10 @@ impl TypeMap {
     fn new() -> TypeMap {
         TypeMap(Vec::new())
     }
-    fn get(&self, name: &str) -> Option<&ast::Type> {
+    fn get(&self, name: &str) -> Option<ast::Type> {
         for scope in self.0.iter().rev() {
             if let Some(t) = scope.get(name) {
-                return Some(t);
+                return Some(t.clone());
             }
         }
         None
@@ -144,18 +162,52 @@ impl ast::Expression {
                     });
                 }
 
-                *lhs_unfilled_type = Some(infer_left);
-                *rhs_unfilled_type = Some(infer_right);
+                *lhs_unfilled_type = Some(infer_left.clone());
+                *rhs_unfilled_type = Some(infer_right.clone());
 
                 let produced_type = op.produce(&infer_left, &infer_right);
                 Ok(produced_type)
             }
             ast::Expression::Variable(name) => match type_map.get(name) {
-                Some(type_) => Ok(*type_),
+                Some(type_) => Ok(type_.clone()),
                 None => Err(TypeError {
                     kind: TypeErrorKind::UnboundVariable(name.clone()),
                 }),
             },
+            ast::Expression::FunctionCall(unfilled_type, name, arguments) => {
+                let type_ = type_map.get(name).ok_or(TypeError {
+                    kind: TypeErrorKind::UnboundVariable(name.clone()),
+                })?;
+                match type_ {
+                    ast::Type::Function(rc) => {
+                        // Typecheck argument list
+                        let arg_types = &rc.1;
+                        if arguments.len() != arg_types.len() {
+                            return Err(TypeError {
+                                kind: TypeErrorKind::WrongArgumentCount(name.clone()),
+                            });
+                        }
+                        for (i, ((unfilled_type, arg), expected_type)) in
+                            arguments.iter_mut().zip(arg_types).enumerate()
+                        {
+                            let arg_type = arg.typecheck(type_map)?;
+                            if arg_type != *expected_type {
+                                return Err(TypeError {
+                                    kind: TypeErrorKind::WrongArgumentType(name.clone(), i),
+                                });
+                            }
+                            *unfilled_type = Some(arg_type.clone());
+                        }
+
+                        let returns = &rc.0;
+                        *unfilled_type = Some(returns.clone());
+                        Ok(returns.clone())
+                    }
+                    _ => Err(TypeError {
+                        kind: TypeErrorKind::CalledNonFunction(name.clone()),
+                    }),
+                }
+            }
         }
     }
 }
@@ -174,13 +226,13 @@ impl ast::Statement {
                         kind: TypeErrorKind::BadVariableDeclarationType(lhs.clone()),
                     });
                 }
-                type_map.bind(lhs.clone(), *type_);
+                type_map.bind(lhs.clone(), type_.clone());
             }
             ast::Statement::SetVariable(ast::SetVariable {
                 lhs,
                 rhs: (unfilled_type, rhs),
             }) => {
-                let lhs_type = *type_map.get(lhs).unwrap();
+                let lhs_type = type_map.get(lhs).unwrap().clone();
                 let rhs_type = rhs.typecheck(type_map)?;
                 if lhs_type != rhs_type {
                     return Err(TypeError {
@@ -208,14 +260,14 @@ impl ast::Statement {
 
                 type_map.push_scope();
                 for statement in body {
-                    statement.typecheck(type_map, function_returns)?;
+                    statement.typecheck(type_map, function_returns.clone())?;
                 }
                 type_map.pop_scope();
             }
             ast::Statement::Loop(body) => {
                 type_map.push_scope();
                 for statement in body {
-                    statement.typecheck(type_map, function_returns)?;
+                    statement.typecheck(type_map, function_returns.clone())?;
                 }
                 type_map.pop_scope();
             }
@@ -230,18 +282,143 @@ impl ast::Statement {
 }
 
 impl ast::Function {
-    pub fn typecheck(&mut self) -> Result<(), TypeError> {
-        let mut type_map = TypeMap::new();
+    pub fn typecheck(&mut self, type_map: &mut TypeMap) -> Result<(), TypeError> {
+        // Function scope
         type_map.push_scope();
 
         for (t, s) in self.parameters.iter() {
-            type_map.bind(s.clone(), *t);
+            type_map.bind(s.clone(), t.clone());
         }
 
         for statement in self.body.iter_mut() {
-            statement.typecheck(&mut type_map, self.returns)?;
+            statement.typecheck(type_map, self.returns.clone())?;
         }
 
         Ok(())
+    }
+}
+
+impl ast::File {
+    pub fn typecheck(&mut self) -> Result<(), TypeError> {
+        let mut type_map = TypeMap::new();
+        type_map.push_scope(); // File scope
+
+        // Because we allow out-of-order definition of functions,
+        // we need to do two passes: One to fill up our file scope
+        // with function types, and the second to do our actual
+        // full typechecking
+        for ast::Function {
+            name,
+            parameters,
+            returns,
+            body: _,
+        } in self.functions.iter_mut()
+        {
+            type_map.bind(
+                name.clone(),
+                ast::Type::Function(Rc::new((
+                    returns.clone(),
+                    parameters.iter().map(|(t, _)| t.clone()).collect(),
+                ))),
+            );
+        }
+
+        // This is the *full* typechecking pass
+        for function in self.functions.iter_mut() {
+            function.typecheck(&mut type_map)?;
+        }
+
+        Ok(())
+    }
+}
+
+#[test]
+fn test_typecheck_failure() {
+    //! One test for each of the possible TypeErrorKind errors
+    {
+        // BadVariableDeclarationType
+
+        let mut f = ast::Function {
+            name: String::from("foo"),
+            parameters: Vec::new(),
+            returns: ast::Type::Bool,
+            body: vec![ast::Statement::MakeVariable(ast::MakeVariable {
+                type_: ast::Type::Bool,
+                lhs: String::from("x"),
+                rhs: ast::Expression::Literal(ast::Literal::Int(0)),
+            })],
+        };
+
+        assert!(matches!(
+            f.typecheck(&mut TypeMap::new()),
+            Err(TypeError{ kind: TypeErrorKind::BadVariableDeclarationType(v) })
+                if &v == "x"
+        ));
+    }
+
+    {
+        // BadReturnType
+
+        let mut f = ast::Function {
+            name: String::from("foo"),
+            parameters: Vec::new(),
+            returns: ast::Type::Bool,
+            body: vec![ast::Statement::Return((
+                None,
+                ast::Expression::Literal(ast::Literal::Int(0)),
+            ))],
+        };
+
+        assert!(matches!(
+            f.typecheck(&mut TypeMap::new()),
+            Err(TypeError {
+                kind: TypeErrorKind::BadReturnType
+            })
+        ));
+    }
+
+    {
+        // IncompatibleOperands
+
+        let mut f = ast::Function {
+            name: String::from("foo"),
+            parameters: Vec::new(),
+            returns: ast::Type::Int,
+            body: vec![ast::Statement::Return((
+                None,
+                ast::Expression::Operation(
+                    ir::Operation::Add,
+                    Box::new((None, ast::Expression::Literal(ast::Literal::Int(1)))),
+                    Box::new((None, ast::Expression::Literal(ast::Literal::Bool(false)))),
+                ),
+            ))],
+        };
+
+        assert!(matches!(
+            f.typecheck(&mut TypeMap::new()),
+            Err(TypeError {
+                kind: TypeErrorKind::IncompatibleOperands(ir::Operation::Add)
+            })
+        ));
+    }
+
+    {
+        // UnboundVariable
+
+        let mut f = ast::Function {
+            name: String::from("foo"),
+            parameters: Vec::new(),
+            returns: ast::Type::Int,
+            body: vec![ast::Statement::Return((
+                None,
+                ast::Expression::Variable(String::from("x")),
+            ))],
+        };
+
+        assert!(matches!(
+            f.typecheck(&mut TypeMap::new()),
+            Err(TypeError{ kind: TypeErrorKind::UnboundVariable(v) })
+                if &v == "x"
+        ));
     }
 }

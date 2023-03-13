@@ -85,3 +85,7 @@ pub struct Function {
     pub parameters: Vec<(Type, String)>,
     pub body: Vec<Block>,
 }
+
+pub struct CompilationUnit {
+    pub functions: Vec<Function>,
+}

@@ -156,6 +156,7 @@ impl Type {
         match self {
             Type::Int => ir::Type::Int,
             Type::Bool => ir::Type::Int,
+            Type::Function(..) => unimplemented!(),
         }
     }
 }
@@ -201,6 +202,20 @@ impl Expression {
                 // Return new RHS which uses those chains
                 ir::Rhs::Operation(operation, left, right)
             }
+            Expression::FunctionCall(type_, name, arguments) => {
+                let _type = type_.rexc_unwrap("Somehow a function call passed the typechecker without having a type filled in!");
+
+                // Create SSA assignment chain for each argument
+                let mut arg_vars = Vec::new();
+                for (arg_type, argument) in arguments {
+                    let arg_type = arg_type.rexc_unwrap("Somehow a function call's argument passed the typechecker without having a type filled in!");
+                    let arg_type = arg_type.to_ir();
+                    let rhs = argument.to_ir(ctor, block);
+                    arg_vars.push(ctor.add_assignment(block, arg_type, rhs));
+                }
+
+                ir::Rhs::FunctionCall(name, arg_vars)
+            }
         }
     }
 }
@@ -238,8 +253,9 @@ fn body_to_ir(
             Statement::Return((type_, expression)) => {
                 let type_ = type_.rexc_unwrap("Somehow a return statement passed the typechecker without its type being filled in!");
                 let rhs = expression.to_ir(ctor, current_block);
-                let index = ctor.add_assignment(current_block, type_.to_ir(), rhs);
-                ctor.add_return(current_block, type_.to_ir(), index);
+                let type_ir = type_.to_ir();
+                let index = ctor.add_assignment(current_block, type_ir, rhs);
+                ctor.add_return(current_block, type_ir, index);
                 // If we don't break we might continue the loop and start constructing
                 // unreachable post-return code!
                 break;
@@ -250,7 +266,8 @@ fn body_to_ir(
             }) => {
                 let type_ = type_.rexc_unwrap("Somehow an if condition passed the typechecker without its type being filled in!");
                 let rhs = condition.to_ir(ctor, current_block);
-                let index = ctor.add_assignment(current_block, type_.to_ir(), rhs);
+                let type_ir = type_.to_ir();
+                let index = ctor.add_assignment(current_block, type_ir, rhs);
 
                 // Construct body of if statement, which can be an arbitrary number of blocks
                 let BodyInformation {
@@ -276,7 +293,7 @@ fn body_to_ir(
                     body_starting_block,
                     post_if_block,
                     index,
-                    type_.to_ir(),
+                    type_ir,
                 );
 
                 match ctor.get_block(body_ending_block).block_terminator {
@@ -358,6 +375,7 @@ fn body_to_ir(
                 let prelude_function_name = String::from(match type_ {
                     Type::Int => "print_int",
                     Type::Bool => "print_bool",
+                    Type::Function(..) => unimplemented!(),
                 });
 
                 let rhs = expression.to_ir(ctor, current_block);
@@ -387,5 +405,17 @@ impl Function {
         body_to_ir(self.body, &mut ctor, &mut None);
 
         ctor.construct()
+    }
+}
+
+impl File {
+    pub fn to_ir(self) -> ir::CompilationUnit {
+        let mut compilation_unit = ir::CompilationUnit {
+            functions: Vec::new(),
+        };
+        for function in self.functions {
+            compilation_unit.functions.push(function.to_ir());
+        }
+        compilation_unit
     }
 }

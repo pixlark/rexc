@@ -36,3 +36,12 @@ impl Function {
         Ok(())
     }
 }
+
+impl File {
+    pub fn validate(&self) -> Result<(), ValidationError> {
+        for function in self.functions.iter() {
+            function.validate()?;
+        }
+        Ok(())
+    }
+}
