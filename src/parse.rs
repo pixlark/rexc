@@ -180,10 +180,27 @@ fn expression(input: &str) -> nom::IResult<&str, ast::Expression> {
     equality_operators.parse(input)
 }
 
+fn function_type(input: &str) -> nom::IResult<&str, ast::Type> {
+    nom::tuple((
+        ws(nom::tag("func")),
+        nom::delimited(
+            ws(nom::char('(')),
+            nom::separated_list0(ws(nom::char(',')), type_annotation),
+            ws(nom::char(')')),
+        ),
+        nom::opt(nom::preceded(ws(nom::tag("->")), type_annotation)),
+    ))
+    .map(|(_func, args, returns)| {
+        ast::Type::Function(std::rc::Rc::new((returns.unwrap_or(ast::Type::Unit), args)))
+    })
+    .parse(input)
+}
+
 fn type_annotation(input: &str) -> nom::IResult<&str, ast::Type> {
     nom::alt((
         ws(nom::tag("int")).map(|_| ast::Type::Int),
         ws(nom::tag("bool")).map(|_| ast::Type::Bool),
+        function_type,
     ))
     .parse(input)
 }

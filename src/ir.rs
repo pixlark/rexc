@@ -20,10 +20,11 @@ impl Variable {
     }
 }
 
-#[derive(Copy, Clone)] // NOTE: Probably temporary while Type is limited to Int
+#[derive(Clone)] // NOTE: Probably temporary while Type is limited to Int
 pub enum Type {
     Void,
     Int,
+    Function(std::rc::Rc<(Type, Vec<Type>)>),
 }
 
 pub enum Literal {
@@ -44,13 +45,20 @@ pub enum Operation {
     GreaterThanOrEqualTo,
 }
 
+pub enum FunctionReference {
+    Local(Variable),
+    Parameter(String),
+    FileScope(String),
+}
+
 pub enum Rhs {
     Void,
     Parameter(String),
     Variable(Variable),
+    FileScopeVariable(String),
     Literal(Literal),
     Operation(Operation, Variable, Variable),
-    FunctionCall(String, Vec<Variable>),
+    FunctionCall(FunctionReference, Vec<Variable>),
 }
 
 pub enum Step {

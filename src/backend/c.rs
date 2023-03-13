@@ -24,6 +24,11 @@ trait CWriter {
     fn string(&mut self, s: &str) -> EmitResult;
     fn variable(&mut self, v: Variable) -> EmitResult;
     fn label(&mut self, b: BlockLocator) -> EmitResult;
+    fn function_pointer(
+        &mut self,
+        f: &std::rc::Rc<(Type, Vec<Type>)>,
+        name: FunctionReference,
+    ) -> EmitResult;
 }
 
 impl<W: Write, E: EmitC<W>> CEmitter<W, E> for LineWriter<W> {
@@ -52,6 +57,25 @@ impl<W: Write> CWriter for LineWriter<W> {
     fn label(&mut self, b: BlockLocator) -> EmitResult {
         write!(self, "_b{}", b.index())
     }
+
+    fn function_pointer(
+        &mut self,
+        f: &std::rc::Rc<(Type, Vec<Type>)>,
+        name: FunctionReference,
+    ) -> EmitResult {
+        self.emit(&f.0)?;
+        self.string("(*")?;
+        self.emit(&name)?;
+        self.string(")(")?;
+        for (i, parameter) in f.1.iter().enumerate() {
+            self.emit(parameter)?;
+            if i < f.1.len() - 1 {
+                self.string(", ")?;
+            }
+        }
+        self.string(")")?;
+        Ok(())
+    }
 }
 
 //
@@ -76,6 +100,7 @@ impl<W: Write> EmitC<W> for Type {
             //               values as chars, which is wasteful.
             Type::Void => write!(writer, "char"),
             Type::Int => write!(writer, "int"),
+            Type::Function(..) => unreachable!(),
         }?;
         Ok(())
     }
@@ -90,12 +115,23 @@ impl<W: Write> EmitC<W> for Literal {
     }
 }
 
+impl<W: Write> EmitC<W> for FunctionReference {
+    fn emit_c(&self, writer: &mut LineWriter<W>) -> EmitResult {
+        match self {
+            FunctionReference::Local(var) => writer.variable(*var),
+            FunctionReference::Parameter(name) => writer.string(name),
+            FunctionReference::FileScope(name) => writer.string(name),
+        }
+    }
+}
+
 impl<W: Write> EmitC<W> for Rhs {
     fn emit_c(&self, writer: &mut LineWriter<W>) -> EmitResult {
         match self {
             Rhs::Void => writer.string("0"),
             Rhs::Parameter(s) => writer.string(s),
             Rhs::Variable(var) => writer.variable(*var),
+            Rhs::FileScopeVariable(s) => writer.string(s),
             Rhs::Literal(literal) => writer.emit(literal),
             Rhs::Operation(op, left, right) => {
                 writer.string("(")?;
@@ -119,7 +155,7 @@ impl<W: Write> EmitC<W> for Rhs {
                 Ok(())
             }
             Rhs::FunctionCall(name, arguments) => {
-                writer.string(name)?;
+                writer.emit(name)?;
                 writer.string("(")?;
                 for (i, argument) in arguments.iter().enumerate() {
                     writer.variable(*argument)?;
@@ -144,9 +180,17 @@ impl Function {
         for (i, pair) in self.parameters.iter().enumerate() {
             let type_ = &pair.0;
             let name = &pair.1;
-            writer.emit(type_)?;
-            writer.space()?;
-            writer.string(name)?;
+            match type_ {
+                Type::Function(rc) => {
+                    // Special case for function pointers in C
+                    writer.function_pointer(rc, FunctionReference::Parameter(name.clone()))?;
+                }
+                _ => {
+                    writer.emit(type_)?;
+                    writer.space()?;
+                    writer.string(name)?;
+                }
+            }
             if i < self.parameters.len() - 1 {
                 writer.string(", ")?;
             }
@@ -204,9 +248,17 @@ impl<W: Write> EmitC<W> for Block {
         for assignment in self.assignments.iter() {
             match assignment {
                 Step::NewAssignment((type_, var), rhs) => {
-                    writer.emit(type_)?;
-                    writer.space()?;
-                    writer.variable(*var)?;
+                    match type_ {
+                        Type::Function(rc) => {
+                            // Special case for function pointers in C
+                            writer.function_pointer(rc, FunctionReference::Local(*var))?;
+                        }
+                        _ => {
+                            writer.emit(type_)?;
+                            writer.space()?;
+                            writer.variable(*var)?;
+                        }
+                    }
                     writer.string(" = ")?;
                     writer.emit(rhs)?;
                     writer.string(";")?;

@@ -1,0 +1,19 @@
+function main() -> int {
+    var f: func(int) -> int = foo
+    applyAndPrint(5)
+    f = bar
+    applyAndPrint(5)
+    return 0
+}
+
+function applyAndPrint(f: func(int) -> int, x: int) {
+    print(f(x))
+}
+
+function foo(x: int) -> int {
+    return x
+}
+
+function bar(x: int) -> int {
+    return x + 1
+}

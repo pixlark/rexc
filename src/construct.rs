@@ -22,13 +22,14 @@ struct BlockConstructor {
     block_terminator: Option<ir::BlockTerminator>,
 }
 
-struct FunctionConstructor {
+struct FunctionConstructor<'a> {
     name: String,
     returns: Option<ir::Type>,
     parameters: Vec<(ir::Type, String)>,
     body: Vec<BlockConstructor>,
     variable_counter: usize,
     variable_map: HashMap<String, ir::Variable>,
+    file_scope_variables: &'a [String],
 }
 
 impl BlockConstructor {
@@ -50,8 +51,8 @@ impl BlockConstructor {
     }
 }
 
-impl FunctionConstructor {
-    fn new(name: String) -> FunctionConstructor {
+impl FunctionConstructor<'_> {
+    fn new(name: String, file_scope_variables: &[String]) -> FunctionConstructor {
         FunctionConstructor {
             name,
             returns: None,
@@ -59,6 +60,7 @@ impl FunctionConstructor {
             body: Vec::new(),
             variable_counter: 0,
             variable_map: HashMap::new(),
+            file_scope_variables,
         }
     }
     fn construct(self) -> ir::Function {
@@ -150,18 +152,21 @@ impl FunctionConstructor {
         arguments: Vec<ir::Variable>,
     ) {
         let block = self.get_block(block);
-        let rhs = ir::Rhs::FunctionCall(name, arguments);
+        let rhs = ir::Rhs::FunctionCall(ir::FunctionReference::FileScope(name), arguments);
         block.assignments.push(ir::Step::Discarded(rhs));
     }
 }
 
 impl Type {
-    fn to_ir(self) -> ir::Type {
+    fn to_ir(&self) -> ir::Type {
         match self {
             Type::Unit => ir::Type::Void,
             Type::Int => ir::Type::Int,
             Type::Bool => ir::Type::Int,
-            Type::Function(..) => unimplemented!(),
+            Type::Function(rc) => ir::Type::Function(std::rc::Rc::new((
+                rc.0.to_ir(),
+                rc.1.iter().map(|t| t.to_ir()).collect(),
+            ))),
         }
     }
 }
@@ -175,17 +180,21 @@ impl Expression {
                 Literal::Bool(b) => ir::Rhs::Literal(ir::Literal::Int(if b { 1 } else { 0 })),
             },
             Expression::Variable(name) => {
-                let mut params_with_name = ctor.parameters.iter().filter(|(_, s)| s == &name);
-                let param = params_with_name.next();
-                rexc_assert(params_with_name.next().is_none());
-                if let Some((_, param)) = param {
-                    ir::Rhs::Parameter(String::from(param))
+                if ctor.file_scope_variables.contains(&name) {
+                    ir::Rhs::FileScopeVariable(name.clone())
                 } else {
-                    let var = ctor
-                        .variable_map
-                        .get(&name)
-                        .rexc_unwrap("Somehow a parameter was never added to the variable map!");
-                    ir::Rhs::Variable(*var)
+                    let mut params_with_name = ctor.parameters.iter().filter(|(_, s)| s == &name);
+                    let param = params_with_name.next();
+                    rexc_assert(params_with_name.next().is_none());
+                    if let Some((_, param)) = param {
+                        ir::Rhs::Parameter(String::from(param))
+                    } else {
+                        let var = ctor
+                            .variable_map
+                            .get(&name)
+                            .rexc_unwrap("Somehow a variable was never added to the variable map!");
+                        ir::Rhs::Variable(*var)
+                    }
                 }
             }
             Expression::Operation(operation, left, right) => {
@@ -220,7 +229,16 @@ impl Expression {
                     arg_vars.push(ctor.add_assignment(block, arg_type, rhs));
                 }
 
-                ir::Rhs::FunctionCall(name, arg_vars)
+                if ctor.variable_map.contains_key(&name) {
+                    // Locally defined function alias
+                    ir::Rhs::FunctionCall(
+                        ir::FunctionReference::Local(*ctor.variable_map.get(&name).unwrap()),
+                        arg_vars,
+                    )
+                } else {
+                    // Standard function
+                    ir::Rhs::FunctionCall(ir::FunctionReference::FileScope(name), arg_vars)
+                }
             }
         }
     }
@@ -267,7 +285,7 @@ fn body_to_ir(
                 let type_ = type_.rexc_unwrap("Somehow a return statement passed the typechecker without its type being filled in!");
                 let rhs = expression.to_ir(ctor, current_block);
                 let type_ir = type_.to_ir();
-                let index = ctor.add_assignment(current_block, type_ir, rhs);
+                let index = ctor.add_assignment(current_block, type_ir.clone(), rhs);
                 ctor.add_return(current_block, type_ir, index);
                 // If we don't break we might continue the loop and start constructing
                 // unreachable post-return code!
@@ -280,7 +298,7 @@ fn body_to_ir(
                 let type_ = type_.rexc_unwrap("Somehow an if condition passed the typechecker without its type being filled in!");
                 let rhs = condition.to_ir(ctor, current_block);
                 let type_ir = type_.to_ir();
-                let index = ctor.add_assignment(current_block, type_ir, rhs);
+                let index = ctor.add_assignment(current_block, type_ir.clone(), rhs);
 
                 // Construct body of if statement, which can be an arbitrary number of blocks
                 let BodyInformation {
@@ -406,8 +424,8 @@ fn body_to_ir(
 }
 
 impl Function {
-    pub fn to_ir(self) -> ir::Function {
-        let mut ctor = FunctionConstructor::new(self.name.clone());
+    pub fn to_ir(self, file_scope_variables: &[String]) -> ir::Function {
+        let mut ctor = FunctionConstructor::new(self.name.clone(), file_scope_variables);
 
         ctor.returns = Some(match self.returns {
             Type::Unit => ir::Type::Void,
@@ -427,11 +445,18 @@ impl Function {
 
 impl File {
     pub fn to_ir(self) -> ir::CompilationUnit {
+        let file_scope_variables = self
+            .functions
+            .iter()
+            .map(|f| f.name.clone())
+            .collect::<Vec<String>>();
         let mut compilation_unit = ir::CompilationUnit {
             functions: Vec::new(),
         };
         for function in self.functions {
-            compilation_unit.functions.push(function.to_ir());
+            compilation_unit
+                .functions
+                .push(function.to_ir(&file_scope_variables));
         }
         compilation_unit
     }
