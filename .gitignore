@@ -15,3 +15,9 @@ source.exe
 
 # Misc. C environment files
 **/.clang-format
+
+# Personal helper scripts
+run-tests.ps1
+generate-stdout.ps1
+build.ps1
+cargo-test.ps1
