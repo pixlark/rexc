@@ -145,6 +145,7 @@ impl ir::Operation {
 impl ast::Expression {
     fn typecheck(&mut self, type_map: &mut TypeMap) -> Result<ast::Type, TypeError> {
         match self {
+            ast::Expression::Unit => Ok(ast::Type::Unit),
             ast::Expression::Literal(lit) => match lit {
                 ast::Literal::Int(_) => Ok(ast::Type::Int),
                 ast::Literal::Bool(_) => Ok(ast::Type::Bool),
@@ -219,6 +220,9 @@ impl ast::Statement {
         function_returns: ast::Type,
     ) -> Result<(), TypeError> {
         match self {
+            ast::Statement::BareExpression((unfilled_type, expression)) => {
+                *unfilled_type = Some(expression.typecheck(type_map)?);
+            }
             ast::Statement::MakeVariable(ast::MakeVariable { type_, lhs, rhs }) => {
                 let infer_type = rhs.typecheck(type_map)?;
                 if infer_type != *type_ {

@@ -16,6 +16,7 @@ use super::ir;
 /// non-trivial type information.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Type {
+    Unit,
     Int,
     Bool,
     Function(Rc<(Type, Vec<Type>)>),
@@ -32,6 +33,7 @@ pub enum Literal {
 
 #[derive(Debug)]
 pub enum Expression {
+    Unit,
     Literal(Literal),
     Variable(String),
     Operation(
@@ -63,6 +65,7 @@ pub struct If {
 
 #[derive(Debug)]
 pub enum Statement {
+    BareExpression(InferredTypedExpression),
     MakeVariable(MakeVariable),
     SetVariable(SetVariable),
     Return(InferredTypedExpression),

@@ -208,8 +208,10 @@ fn var_decl(input: &str) -> nom::IResult<&str, ast::Statement> {
 }
 
 fn return_(input: &str) -> nom::IResult<&str, ast::Statement> {
-    nom::tuple((ws(nom::tag("return")), expression))
-        .map(|(_ret, expression)| ast::Statement::Return((None, expression)))
+    nom::tuple((ws(nom::tag("return")), nom::opt(expression)))
+        .map(|(_ret, expression)| {
+            ast::Statement::Return((None, expression.unwrap_or(ast::Expression::Unit)))
+        })
         .parse(input)
 }
 
@@ -256,8 +258,24 @@ fn var_set(input: &str) -> nom::IResult<&str, ast::Statement> {
         .parse(input)
 }
 
+fn bare_expression(input: &str) -> nom::IResult<&str, ast::Statement> {
+    expression
+        .map(|expr| ast::Statement::BareExpression((None, expr)))
+        .parse(input)
+}
+
 fn statement(input: &str) -> nom::IResult<&str, ast::Statement> {
-    nom::alt((var_decl, return_, if_, loop_, break_, print_, var_set)).parse(input)
+    nom::alt((
+        var_decl,
+        return_,
+        if_,
+        loop_,
+        break_,
+        print_,
+        var_set,
+        bare_expression,
+    ))
+    .parse(input)
 }
 
 fn body(input: &str) -> nom::IResult<&str, Vec<ast::Statement>> {
@@ -287,15 +305,14 @@ pub fn function(input: &str) -> nom::IResult<&str, ast::Function> {
         ws(nom::tag("function")),
         ws(identifier),
         nom::delimited(ws(nom::char('(')), parameters, ws(nom::char(')'))),
-        ws(nom::tag("->")),
-        ws(type_annotation),
+        nom::opt(nom::pair(ws(nom::tag("->")), ws(type_annotation)).map(|(_arrow, type_)| type_)),
         body,
     ))
     .map(
-        |(_function, name, parameters, _arrow, returns, body)| ast::Function {
+        |(_function, name, parameters, returns, body)| ast::Function {
             name,
             parameters,
-            returns,
+            returns: returns.unwrap_or(ast::Type::Unit),
             body,
         },
     )

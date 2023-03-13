@@ -20,6 +20,11 @@ impl<T, E> InternalCompilerErrorable<T> for Result<T, E> {
     }
 }
 
+pub fn rexc_panic(msg: &str) -> ! {
+    eprintln!("** Internal Compiler Error! **\n");
+    panic!("{}", msg);
+}
+
 pub fn rexc_assert(pred: bool) {
     if !pred {
         eprintln!("** Internal Compiler Error: Assertion Failed! **");

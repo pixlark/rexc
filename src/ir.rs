@@ -45,6 +45,7 @@ pub enum Operation {
 }
 
 pub enum Rhs {
+    Void,
     Parameter(String),
     Variable(Variable),
     Literal(Literal),

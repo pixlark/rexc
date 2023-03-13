@@ -139,6 +139,10 @@ impl FunctionConstructor {
             (condition_type, condition_var),
         ));
     }
+    fn add_discarded_value(&mut self, block: ir::BlockLocator, rhs: ir::Rhs) {
+        let block = self.get_block(block);
+        block.assignments.push(ir::Step::Discarded(rhs));
+    }
     fn add_void_function_call(
         &mut self,
         block: ir::BlockLocator,
@@ -154,6 +158,7 @@ impl FunctionConstructor {
 impl Type {
     fn to_ir(self) -> ir::Type {
         match self {
+            Type::Unit => ir::Type::Void,
             Type::Int => ir::Type::Int,
             Type::Bool => ir::Type::Int,
             Type::Function(..) => unimplemented!(),
@@ -164,6 +169,7 @@ impl Type {
 impl Expression {
     fn to_ir(self, ctor: &mut FunctionConstructor, block: ir::BlockLocator) -> ir::Rhs {
         match self {
+            Expression::Unit => ir::Rhs::Void,
             Expression::Literal(literal) => match literal {
                 Literal::Int(i) => ir::Rhs::Literal(ir::Literal::Int(i)),
                 Literal::Bool(b) => ir::Rhs::Literal(ir::Literal::Int(if b { 1 } else { 0 })),
@@ -235,6 +241,13 @@ fn body_to_ir(
 
     for statement in body {
         match statement {
+            Statement::BareExpression((type_, expression)) => {
+                let _type = type_.rexc_unwrap("Somehow a bare expression passed the typechecker without its type being filled in!")
+                    .to_ir();
+                let rhs = expression.to_ir(ctor, current_block);
+
+                ctor.add_discarded_value(current_block, rhs);
+            }
             Statement::MakeVariable(MakeVariable { type_, lhs, rhs }) => {
                 let ir_rhs = rhs.to_ir(ctor, current_block);
                 let index = ctor.add_assignment(current_block, type_.to_ir(), ir_rhs);
@@ -373,6 +386,7 @@ fn body_to_ir(
             Statement::Print((type_, expression)) => {
                 let type_ = type_.rexc_unwrap("Somehow a print statement passed the typechecker without its type being filled in!");
                 let prelude_function_name = String::from(match type_ {
+                    Type::Unit => "print_unit",
                     Type::Int => "print_int",
                     Type::Bool => "print_bool",
                     Type::Function(..) => unimplemented!(),
@@ -395,7 +409,10 @@ impl Function {
     pub fn to_ir(self) -> ir::Function {
         let mut ctor = FunctionConstructor::new(self.name.clone());
 
-        ctor.returns = Some(self.returns.to_ir());
+        ctor.returns = Some(match self.returns {
+            Type::Unit => ir::Type::Void,
+            _ => self.returns.to_ir(),
+        });
         ctor.parameters = self
             .parameters
             .into_iter()

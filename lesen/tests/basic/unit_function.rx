@@ -1,0 +1,9 @@
+function main() -> int {
+    print(voidfunction(10))
+    return 0
+}
+
+function voidfunction(x: int) {
+    print(x)
+    return
+}

@@ -70,7 +70,11 @@ pub trait EmitC<W: Write> {
 impl<W: Write> EmitC<W> for Type {
     fn emit_c(&self, writer: &mut LineWriter<W>) -> EmitResult {
         match self {
-            Type::Void => write!(writer, "void"), // TODO(Brooke): Should this panic maybe?
+            // TODO(Brooke): Void values (unit values) should be handled properly - i.e.
+            //               they should be elided when possible, and converted to 'void'
+            //               for function return values. At the moment we represent unit
+            //               values as chars, which is wasteful.
+            Type::Void => write!(writer, "char"),
             Type::Int => write!(writer, "int"),
         }?;
         Ok(())
@@ -89,6 +93,7 @@ impl<W: Write> EmitC<W> for Literal {
 impl<W: Write> EmitC<W> for Rhs {
     fn emit_c(&self, writer: &mut LineWriter<W>) -> EmitResult {
         match self {
+            Rhs::Void => writer.string("0"),
             Rhs::Parameter(s) => writer.string(s),
             Rhs::Variable(var) => writer.variable(*var),
             Rhs::Literal(literal) => writer.emit(literal),
