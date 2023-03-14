@@ -1,8 +1,13 @@
 function main() -> int {
-    var x: ***int = alloc(**int)
-    at x = alloc(*int)
-    at at x = alloc(int)
-    at at at x = 5
-    print(at at at x)
+    var x: *int = alloc(5)
+    var x2: **int = alloc(x)
+    var x3: ***int = alloc(x2)
+
+    print(at at at x3)
+
+    at at at x3 = 10
+
+    print(at at at x3)
+
     return 0
 }

@@ -6,8 +6,7 @@ function main() -> int {
 }
 
 function get_fn_ptr_ptr() -> *func(int) -> int {
-    var ptr: *func(int) -> int = alloc(func(int) -> int)
-    at ptr = succ
+    var ptr: *func(int) -> int = alloc(succ)
     return ptr
 }
 

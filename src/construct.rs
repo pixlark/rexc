@@ -246,13 +246,39 @@ impl Expression {
                     ir::Rhs::FunctionCall(ir::FunctionReference::FileScope(name), arg_vars)
                 }
             }
-            Expression::Allocate(type_) => {
+            Expression::Allocate(ite) => {
+                let (type_, expr) = *ite;
+                let type_ = type_.rexc_unwrap("Somehow an alloc expression got past the typechecker without having its type filled in!");
                 let type_ir = type_.to_ir();
-                let sizeof = ctor.add_assignment(block, ir::Type::Int, ir::Rhs::SizeOf(type_ir));
-                ir::Rhs::FunctionCall(
-                    ir::FunctionReference::FileScope(String::from("alloc")),
-                    vec![sizeof],
-                )
+
+                // Allocate the space
+                let sizeof =
+                    ctor.add_assignment(block, ir::Type::Int, ir::Rhs::SizeOf(type_ir.clone()));
+                let allocation = ctor.add_assignment(
+                    block,
+                    ir::Type::Pointer(Box::new(type_ir.clone())),
+                    ir::Rhs::FunctionCall(
+                        ir::FunctionReference::FileScope(String::from("alloc")),
+                        vec![sizeof],
+                    ),
+                );
+
+                // Create the initial value
+                let rhs = expr.to_ir(ctor, block);
+                let value = ctor.add_assignment(block, type_ir.clone(), rhs);
+
+                // Assign the value to the allocated pointer
+                ctor.add_reassignment(
+                    block,
+                    ir::LValue {
+                        var: allocation,
+                        derefs: 1,
+                    },
+                    ir::Rhs::Variable(value),
+                );
+
+                // Return the pointer variable
+                ir::Rhs::Variable(allocation)
             }
         }
     }

@@ -96,9 +96,9 @@ fn arguments(input: &str) -> nom::IResult<&str, Vec<ast::Expression>> {
 fn alloc_(input: &str) -> nom::IResult<&str, ast::Expression> {
     nom::preceded(
         ws(nom::tag("alloc")),
-        nom::delimited(ws(nom::char('(')), type_annotation, ws(nom::char(')'))),
+        nom::delimited(ws(nom::char('(')), expression, ws(nom::char(')'))),
     )
-    .map(|type_| ast::Expression::Allocate(type_))
+    .map(|expression| ast::Expression::Allocate(Box::new((None, expression))))
     .parse(input)
 }
 

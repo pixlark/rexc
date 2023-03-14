@@ -1,5 +1,5 @@
 function main() -> int {
-    var ptr: *int = alloc(int)
+    var ptr: *int = alloc(0)
     at ptr = 5
     print(at ptr)
 

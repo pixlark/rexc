@@ -55,7 +55,7 @@ pub enum Expression {
         Box<InferredTypedExpression>,
     ),
     FunctionCall(InferredType, String, Vec<InferredTypedExpression>),
-    Allocate(Type),
+    Allocate(Box<InferredTypedExpression>),
 }
 
 #[derive(Debug)]

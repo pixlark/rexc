@@ -197,7 +197,6 @@ impl ast::Expression {
                 }),
             },
             ast::Expression::Dereference(..) => {
-                println!("&mut self: {:#?}", self);
                 let derefed_expression = self.get_deref()?;
                 let derefed_type = derefed_expression.borrow_mut().typecheck(type_map)?;
                 match derefed_type {
@@ -241,7 +240,12 @@ impl ast::Expression {
                     }),
                 }
             }
-            ast::Expression::Allocate(type_) => Ok(ast::Type::Pointer(Box::new(type_.clone()))),
+            ast::Expression::Allocate(ite) => {
+                let (unfilled_type, expression) = ite.as_mut();
+                let inferred_type = expression.typecheck(type_map)?;
+                *unfilled_type = Some(inferred_type.clone());
+                Ok(ast::Type::Pointer(Box::new(inferred_type)))
+            }
         }
     }
 }
