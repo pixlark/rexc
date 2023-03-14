@@ -19,6 +19,7 @@ pub enum Type {
     Unit,
     Int,
     Bool,
+    Pointer(Box<Type>),
     Function(Rc<(Type, Vec<Type>)>),
 }
 
@@ -36,12 +37,14 @@ pub enum Expression {
     Unit,
     Literal(Literal),
     Variable(String),
+    Dereference(Box<Expression>),
     Operation(
         ir::Operation,
         Box<InferredTypedExpression>,
         Box<InferredTypedExpression>,
     ),
     FunctionCall(InferredType, String, Vec<InferredTypedExpression>),
+    Allocate(Type),
 }
 
 #[derive(Debug)]
@@ -51,9 +54,15 @@ pub struct MakeVariable {
     pub rhs: Expression,
 }
 
+#[derive(Debug, Clone)]
+pub enum LValue {
+    Name(String),
+    Dereference(Box<LValue>),
+}
+
 #[derive(Debug)]
 pub struct SetVariable {
-    pub lhs: String,
+    pub lhs: LValue,
     pub rhs: InferredTypedExpression,
 }
 

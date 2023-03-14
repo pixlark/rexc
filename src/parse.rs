@@ -90,6 +90,15 @@ fn arguments(input: &str) -> nom::IResult<&str, Vec<ast::Expression>> {
     nom::separated_list0(ws(nom::char(',')), expression).parse(input)
 }
 
+fn alloc_(input: &str) -> nom::IResult<&str, ast::Expression> {
+    nom::preceded(
+        ws(nom::tag("alloc")),
+        nom::delimited(ws(nom::char('(')), type_annotation, ws(nom::char(')'))),
+    )
+    .map(|type_| ast::Expression::Allocate(type_))
+    .parse(input)
+}
+
 fn function_call(input: &str) -> nom::IResult<&str, ast::Expression> {
     nom::pair(
         ws(identifier),
@@ -138,13 +147,28 @@ macro_rules! left_assoc_operator {
     };
 }
 
+fn dereference(input: &str) -> nom::IResult<&str, ast::Expression> {
+    nom::pair(
+        nom::many0_count(ws(nom::tag("at"))),
+        nom::alt((alloc_, function_call, atom)),
+    )
+    .map(|(deref_count, interior)| {
+        let mut expression = interior;
+        for _ in 0..deref_count {
+            expression = ast::Expression::Dereference(Box::new(expression));
+        }
+        expression
+    })
+    .parse(input)
+}
+
 left_assoc_operator! {
     multiplicative_operators,
     nom::alt((
         ws(nom::char('*')).map(|_| ir::Operation::Multiply),
         ws(nom::char('/')).map(|_| ir::Operation::Divide)
     )),
-    nom::alt((function_call, atom))
+    dereference
 }
 
 left_assoc_operator! {
@@ -197,11 +221,21 @@ fn function_type(input: &str) -> nom::IResult<&str, ast::Type> {
 }
 
 fn type_annotation(input: &str) -> nom::IResult<&str, ast::Type> {
-    nom::alt((
-        ws(nom::tag("int")).map(|_| ast::Type::Int),
-        ws(nom::tag("bool")).map(|_| ast::Type::Bool),
-        function_type,
-    ))
+    nom::pair(
+        nom::many0_count(ws(nom::char('*'))),
+        nom::alt((
+            ws(nom::tag("int")).map(|_| ast::Type::Int),
+            ws(nom::tag("bool")).map(|_| ast::Type::Bool),
+            function_type,
+        )),
+    )
+    .map(|(ptr_count, inner_type)| {
+        let mut type_ = inner_type;
+        for _ in 0..ptr_count {
+            type_ = ast::Type::Pointer(Box::new(type_))
+        }
+        type_
+    })
     .parse(input)
 }
 
@@ -264,11 +298,23 @@ fn break_(input: &str) -> nom::IResult<&str, ast::Statement> {
         .parse(input)
 }
 
+fn lvalue(input: &str) -> nom::IResult<&str, ast::LValue> {
+    nom::pair(nom::many0_count(ws(nom::tag("at"))), ws(identifier))
+        .map(|(deref_count, interior)| {
+            let mut lhs = ast::LValue::Name(interior);
+            for _ in 0..deref_count {
+                lhs = ast::LValue::Dereference(Box::new(lhs));
+            }
+            lhs
+        })
+        .parse(input)
+}
+
 fn var_set(input: &str) -> nom::IResult<&str, ast::Statement> {
-    nom::tuple((ws(identifier), ws(nom::char('=')), expression))
-        .map(|(ident, _equals, expression)| {
+    nom::tuple((lvalue, ws(nom::char('=')), expression))
+        .map(|(lhs, _equals, expression)| {
             ast::Statement::SetVariable(ast::SetVariable {
-                lhs: ident,
+                lhs,
                 rhs: (None, expression),
             })
         })
@@ -365,15 +411,14 @@ fn test_parse() {
     println!();
     println!(
         "{:#?}",
-        file(
-            "\
-function main() -> int {
+        body(
+            "{
+    var ptr: int = 5
+    *ptr = 5
+    print(*ptr)
+
     return 0
-}
-function foo(x: int) -> bool {
-    return x > 0
-}
-"
+}"
         )
     );
 }

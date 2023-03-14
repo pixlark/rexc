@@ -1,0 +1,7 @@
+function main() -> int {
+    var ptr: *int = alloc(int)
+    at ptr = 5
+    print(at ptr)
+
+    return 0
+}

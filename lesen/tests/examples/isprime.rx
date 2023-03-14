@@ -1,0 +1,40 @@
+function modulus(x: int, base: int) -> int {
+    var counter: int = x
+    loop {
+        if counter < base {
+            break
+        }
+        counter = counter - base
+    }
+    return counter
+}
+
+function isprime(p: int) -> bool {
+    if p < 2 {
+        return false
+    }
+    var divisor: int = 2
+    loop {
+        if divisor == p {
+            break
+        }
+        if modulus(p, divisor) == 0 {
+            return false
+        }
+        divisor = divisor + 1
+    }
+    return true
+}
+
+function main() -> int {
+    var i: int = 2
+    loop {
+        print(i)
+        print(isprime(i))
+        if i == 15 {
+            break
+        }
+        i = i + 1
+    }
+    return 0
+}

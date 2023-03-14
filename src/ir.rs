@@ -24,6 +24,7 @@ impl Variable {
 pub enum Type {
     Void,
     Int,
+    Pointer(Box<Type>),
     Function(std::rc::Rc<(Type, Vec<Type>)>),
 }
 
@@ -55,10 +56,18 @@ pub enum Rhs {
     Void,
     Parameter(String),
     Variable(Variable),
+    Dereference(Box<Rhs>),
     FileScopeVariable(String),
     Literal(Literal),
     Operation(Operation, Variable, Variable),
     FunctionCall(FunctionReference, Vec<Variable>),
+    SizeOf(Type),
+}
+
+#[derive(Clone)]
+pub enum LValue {
+    Variable(Variable),
+    Dereference(Box<LValue>),
 }
 
 pub enum Step {
@@ -68,7 +77,7 @@ pub enum Step {
     /// LLVM has an automatic way of dealing with mutable variables, so we don't have to do
     /// dominance frontier SSA calculations ourselves. Instead, we just let ourselves mutate
     /// variables, easy-peasy.
-    Assignment(Variable, Rhs),
+    Assignment(LValue, Rhs),
     Discarded(Rhs),
 }
 

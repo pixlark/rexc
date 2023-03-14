@@ -15,10 +15,11 @@ pub enum TypeErrorKind {
     BadReturnType,
     IncompatibleOperands(ir::Operation),
     UnboundVariable(String),
-    AssignedWrongTypeToVariable(String),
+    AssignedWrongTypeToVariable(ast::LValue),
     CalledNonFunction(String),
     WrongArgumentCount(String),
     WrongArgumentType(String, usize),
+    DereferencedNonPointer,
 }
 
 #[derive(Debug)]
@@ -47,11 +48,11 @@ impl std::fmt::Display for TypeError {
             TypeErrorKind::UnboundVariable(var) => {
                 write!(f, "Variable {} is used but was never bound.", var)
             }
-            TypeErrorKind::AssignedWrongTypeToVariable(var) => {
+            TypeErrorKind::AssignedWrongTypeToVariable(lhs) => {
                 write!(
                     f,
-                    "Tried to assign an expression of the wrong type to variable {}",
-                    var
+                    "Tried to assign an expression of the wrong type to lvalue {:?}",
+                    lhs
                 )
             }
             TypeErrorKind::CalledNonFunction(var) => {
@@ -66,6 +67,9 @@ impl std::fmt::Display for TypeError {
                     "Argument #{} in call to {} is the incorrect type.",
                     arg_index, name
                 )
+            }
+            TypeErrorKind::DereferencedNonPointer => {
+                write!(f, "Tried to dereference a non-pointer type.")
             }
         }
     }
@@ -170,11 +174,20 @@ impl ast::Expression {
                 Ok(produced_type)
             }
             ast::Expression::Variable(name) => match type_map.get(name) {
-                Some(type_) => Ok(type_.clone()),
+                Some(type_) => Ok(type_),
                 None => Err(TypeError {
                     kind: TypeErrorKind::UnboundVariable(name.clone()),
                 }),
             },
+            ast::Expression::Dereference(interior) => {
+                let interior_type = interior.typecheck(type_map)?;
+                match interior_type {
+                    ast::Type::Pointer(ptr_interior_type) => Ok(*ptr_interior_type),
+                    _ => Err(TypeError {
+                        kind: TypeErrorKind::DereferencedNonPointer,
+                    }),
+                }
+            }
             ast::Expression::FunctionCall(unfilled_type, name, arguments) => {
                 let type_ = type_map.get(name).ok_or(TypeError {
                     kind: TypeErrorKind::UnboundVariable(name.clone()),
@@ -209,6 +222,22 @@ impl ast::Expression {
                     }),
                 }
             }
+            ast::Expression::Allocate(type_) => Ok(ast::Type::Pointer(Box::new(type_.clone()))),
+        }
+    }
+}
+
+impl ast::LValue {
+    fn typecheck(&mut self, type_map: &TypeMap) -> Result<ast::Type, TypeError> {
+        match self {
+            // TODO(Brooke): Evaluate this `.unwrap()`
+            ast::LValue::Name(name) => Ok(type_map.get(name).unwrap()),
+            ast::LValue::Dereference(interior) => match interior.typecheck(type_map)? {
+                ast::Type::Pointer(interior) => Ok(*interior),
+                _ => Err(TypeError {
+                    kind: TypeErrorKind::DereferencedNonPointer,
+                }),
+            },
         }
     }
 }
@@ -236,7 +265,7 @@ impl ast::Statement {
                 lhs,
                 rhs: (unfilled_type, rhs),
             }) => {
-                let lhs_type = type_map.get(lhs).unwrap().clone();
+                let lhs_type = lhs.typecheck(type_map)?;
                 let rhs_type = rhs.typecheck(type_map)?;
                 if lhs_type != rhs_type {
                     return Err(TypeError {

@@ -98,7 +98,7 @@ impl FunctionConstructor<'_> {
 
         var
     }
-    fn add_reassignment(&mut self, block: ir::BlockLocator, lhs: ir::Variable, rhs: ir::Rhs) {
+    fn add_reassignment(&mut self, block: ir::BlockLocator, lhs: ir::LValue, rhs: ir::Rhs) {
         let block = self.get_block(block);
         block.assignments.push(ir::Step::Assignment(lhs, rhs));
     }
@@ -163,6 +163,7 @@ impl Type {
             Type::Unit => ir::Type::Void,
             Type::Int => ir::Type::Int,
             Type::Bool => ir::Type::Int,
+            Type::Pointer(type_) => ir::Type::Pointer(Box::new(type_.to_ir())),
             Type::Function(rc) => ir::Type::Function(std::rc::Rc::new((
                 rc.0.to_ir(),
                 rc.1.iter().map(|t| t.to_ir()).collect(),
@@ -196,6 +197,9 @@ impl Expression {
                         ir::Rhs::Variable(*var)
                     }
                 }
+            }
+            Expression::Dereference(interior) => {
+                ir::Rhs::Dereference(Box::new(interior.to_ir(ctor, block)))
             }
             Expression::Operation(operation, left, right) => {
                 let (left_type, left) = *left;
@@ -240,6 +244,26 @@ impl Expression {
                     ir::Rhs::FunctionCall(ir::FunctionReference::FileScope(name), arg_vars)
                 }
             }
+            Expression::Allocate(type_) => {
+                let type_ir = type_.to_ir();
+                let sizeof = ctor.add_assignment(block, ir::Type::Int, ir::Rhs::SizeOf(type_ir));
+                ir::Rhs::FunctionCall(
+                    ir::FunctionReference::FileScope(String::from("alloc")),
+                    vec![sizeof],
+                )
+            }
+        }
+    }
+}
+
+impl LValue {
+    fn to_ir(&mut self, ctor: &mut FunctionConstructor) -> ir::LValue {
+        match self {
+            // TODO(Brooke): Evaluate this `.unwrap()`
+            LValue::Name(name) => ir::LValue::Variable(*ctor.variable_map.get(name).unwrap()),
+            LValue::Dereference(interior) => {
+                ir::LValue::Dereference(Box::new(interior.to_ir(ctor)))
+            }
         }
     }
 }
@@ -272,14 +296,15 @@ fn body_to_ir(
                 ctor.variable_map.insert(lhs, index);
             }
             Statement::SetVariable(SetVariable {
-                lhs,
+                mut lhs,
                 rhs: (_type, rhs),
             }) => {
                 let ir_rhs = rhs.to_ir(ctor, current_block);
-                let var = ctor.variable_map.get(&lhs)
-                    .rexc_unwrap("Somehow a bad variable assignment passed the typechecker without UnboundVariable being thrown!");
+                /*let ir_lhs = ctor.variable_map.get_lvalue(&lhs)
+                .rexc_unwrap("Somehow a bad variable assignment passed the typechecker without UnboundVariable being thrown!");*/
+                let ir_lhs = lhs.to_ir(ctor);
 
-                ctor.add_reassignment(current_block, *var, ir_rhs);
+                ctor.add_reassignment(current_block, ir_lhs, ir_rhs);
             }
             Statement::Return((type_, expression)) => {
                 let type_ = type_.rexc_unwrap("Somehow a return statement passed the typechecker without its type being filled in!");
@@ -407,6 +432,7 @@ fn body_to_ir(
                     Type::Unit => "print_unit",
                     Type::Int => "print_int",
                     Type::Bool => "print_bool",
+                    Type::Pointer(..) => "print_pointer",
                     Type::Function(..) => unimplemented!(),
                 });
 

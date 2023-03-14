@@ -1,6 +1,7 @@
 //! The C backend for Rexc. This is where IR code gets translated directly
 //! into C code.
 
+use std::borrow::Borrow;
 use std::io::{LineWriter, Result, Write};
 
 use super::super::internal_error::*;
@@ -24,11 +25,7 @@ trait CWriter {
     fn string(&mut self, s: &str) -> EmitResult;
     fn variable(&mut self, v: Variable) -> EmitResult;
     fn label(&mut self, b: BlockLocator) -> EmitResult;
-    fn function_pointer(
-        &mut self,
-        f: &std::rc::Rc<(Type, Vec<Type>)>,
-        name: FunctionReference,
-    ) -> EmitResult;
+    fn lvalue(&mut self, lhs: &LValue) -> EmitResult;
 }
 
 impl<W: Write, E: EmitC<W>> CEmitter<W, E> for LineWriter<W> {
@@ -58,23 +55,64 @@ impl<W: Write> CWriter for LineWriter<W> {
         write!(self, "_b{}", b.index())
     }
 
-    fn function_pointer(
-        &mut self,
-        f: &std::rc::Rc<(Type, Vec<Type>)>,
-        name: FunctionReference,
-    ) -> EmitResult {
-        self.emit(&f.0)?;
-        self.string("(*")?;
-        self.emit(&name)?;
-        self.string(")(")?;
-        for (i, parameter) in f.1.iter().enumerate() {
-            self.emit(parameter)?;
-            if i < f.1.len() - 1 {
-                self.string(", ")?;
+    fn lvalue(&mut self, lhs: &LValue) -> EmitResult {
+        match lhs {
+            LValue::Variable(var) => self.variable(*var),
+            LValue::Dereference(interior) => {
+                self.string("*")?;
+                self.lvalue(interior.as_ref())?;
+                Ok(())
             }
         }
-        self.string(")")?;
-        Ok(())
+    }
+}
+
+fn emit_function_pointer<W: Write>(
+    w: &mut LineWriter<W>,
+    f: Type,
+    interior: &dyn Fn(&mut LineWriter<W>) -> EmitResult,
+) -> EmitResult {
+    fn helper<W: Write>(
+        w: &mut LineWriter<W>,
+        f: Type,
+        interior: &dyn Fn(&mut LineWriter<W>) -> EmitResult,
+        pointer_count: usize,
+    ) -> EmitResult {
+        match f {
+            Type::Function(f) => {
+                w.emit(&f.0)?;
+                w.string("(*")?;
+                for _ in 0..pointer_count {
+                    w.string("*")?;
+                }
+                interior(w)?;
+                w.string(")(")?;
+                for (i, parameter) in f.1.iter().enumerate() {
+                    w.emit(parameter)?;
+                    if i < f.1.len() - 1 {
+                        w.string(", ")?;
+                    }
+                }
+                w.string(")")?;
+                Ok(())
+            }
+            Type::Pointer(inner) => helper(w, *inner, interior, pointer_count + 1),
+            _ => unreachable!(),
+        }
+    }
+    helper(w, f, interior, 0)
+}
+
+impl Type {
+    /// Is this a direct function pointer, or a pointer to a
+    /// function pointer, or a pointer to a pointer to a...
+    /// You get the gist.
+    fn is_function_pointer(&self) -> bool {
+        match self {
+            Type::Function(..) => true,
+            Type::Pointer(t) => t.is_function_pointer(),
+            _ => false,
+        }
     }
 }
 
@@ -100,7 +138,19 @@ impl<W: Write> EmitC<W> for Type {
             //               values as chars, which is wasteful.
             Type::Void => write!(writer, "char"),
             Type::Int => write!(writer, "int"),
-            Type::Function(..) => unreachable!(),
+            Type::Pointer(inner) => {
+                if inner.is_function_pointer() {
+                    // Special case for function pointers in C
+                    emit_function_pointer(writer, Type::Pointer(inner.clone()), &|_| Ok(()))?;
+                } else {
+                    writer.emit(inner.as_ref())?;
+                    writer.string("*")?;
+                }
+                Ok(())
+            }
+            Type::Function(f) => {
+                emit_function_pointer(writer, Type::Function(f.clone()), &|_| Ok(()))
+            }
         }?;
         Ok(())
     }
@@ -131,6 +181,11 @@ impl<W: Write> EmitC<W> for Rhs {
             Rhs::Void => writer.string("0"),
             Rhs::Parameter(s) => writer.string(s),
             Rhs::Variable(var) => writer.variable(*var),
+            Rhs::Dereference(interior) => {
+                writer.string("*")?;
+                writer.emit(interior.as_ref())?;
+                Ok(())
+            }
             Rhs::FileScopeVariable(s) => writer.string(s),
             Rhs::Literal(literal) => writer.emit(literal),
             Rhs::Operation(op, left, right) => {
@@ -166,6 +221,12 @@ impl<W: Write> EmitC<W> for Rhs {
                 writer.string(")")?;
                 Ok(())
             }
+            Rhs::SizeOf(type_) => {
+                writer.string("(sizeof(")?;
+                writer.emit(type_)?;
+                writer.string("))")?;
+                Ok(())
+            }
         }?;
         Ok(())
     }
@@ -173,29 +234,36 @@ impl<W: Write> EmitC<W> for Rhs {
 
 impl Function {
     fn emit_c_header<W: Write>(&self, writer: &mut LineWriter<W>) -> EmitResult {
-        self.returns.emit_c(writer)?;
-        writer.space()?;
-        writer.string(&self.name)?;
-        writer.string("(")?;
-        for (i, pair) in self.parameters.iter().enumerate() {
-            let type_ = &pair.0;
-            let name = &pair.1;
-            match type_ {
-                Type::Function(rc) => {
+        let interior = |writer: &mut LineWriter<W>| -> EmitResult {
+            writer.string(&self.name)?;
+            writer.string("(")?;
+            for (i, pair) in self.parameters.iter().enumerate() {
+                let type_ = &pair.0;
+                let name = &pair.1;
+                if type_.is_function_pointer() {
                     // Special case for function pointers in C
-                    writer.function_pointer(rc, FunctionReference::Parameter(name.clone()))?;
-                }
-                _ => {
+                    emit_function_pointer(writer, type_.clone(), &|w| {
+                        w.emit(&FunctionReference::Parameter(name.clone()))
+                    })?;
+                } else {
                     writer.emit(type_)?;
                     writer.space()?;
                     writer.string(name)?;
                 }
+                if i < self.parameters.len() - 1 {
+                    writer.string(", ")?;
+                }
             }
-            if i < self.parameters.len() - 1 {
-                writer.string(", ")?;
-            }
+            writer.string(")")?;
+            Ok(())
+        };
+        if self.returns.is_function_pointer() {
+            emit_function_pointer(writer, self.returns.clone(), &interior)?;
+        } else {
+            self.returns.emit_c(writer)?;
+            writer.space()?;
+            interior(writer)?;
         }
-        writer.string(")")?;
         Ok(())
     }
     pub fn emit_c_prototype<W: Write>(&self, writer: &mut LineWriter<W>) -> EmitResult {
@@ -248,16 +316,15 @@ impl<W: Write> EmitC<W> for Block {
         for assignment in self.assignments.iter() {
             match assignment {
                 Step::NewAssignment((type_, var), rhs) => {
-                    match type_ {
-                        Type::Function(rc) => {
-                            // Special case for function pointers in C
-                            writer.function_pointer(rc, FunctionReference::Local(*var))?;
-                        }
-                        _ => {
-                            writer.emit(type_)?;
-                            writer.space()?;
-                            writer.variable(*var)?;
-                        }
+                    if type_.is_function_pointer() {
+                        // Special case for function pointers in C
+                        emit_function_pointer(writer, type_.clone(), &|w| {
+                            w.emit(&FunctionReference::Local(*var))
+                        })?;
+                    } else {
+                        writer.emit(type_)?;
+                        writer.space()?;
+                        writer.variable(*var)?;
                     }
                     writer.string(" = ")?;
                     writer.emit(rhs)?;
@@ -265,7 +332,7 @@ impl<W: Write> EmitC<W> for Block {
                     writer.newline()?;
                 }
                 Step::Assignment(var, rhs) => {
-                    writer.variable(*var)?;
+                    writer.lvalue(var)?;
                     writer.string(" = ")?;
                     writer.emit(rhs)?;
                     writer.string(";")?;

@@ -1,0 +1,16 @@
+function main() -> int {
+    var ptr: *func(int) -> int = get_fn_ptr_ptr()
+    var f: func(int) -> int = at ptr
+    print(f(1))
+    return 0
+}
+
+function get_fn_ptr_ptr() -> *func(int) -> int {
+    var ptr: *func(int) -> int = alloc(func(int) -> int)
+    at ptr = succ
+    return ptr
+}
+
+function succ(x: int) -> int {
+    return x + 1
+}
