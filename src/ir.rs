@@ -56,7 +56,17 @@ pub enum Rhs {
     Void,
     Parameter(String),
     Variable(Variable),
-    Dereference(Box<Rhs>),
+    /// TOOD(Brooke):
+    /// Should this be `Variable` instead of `Rhs`? Then `***p` would become
+    /// ```
+    ///  int*** _0 = ...;
+    ///  int**  _1 = *_0;
+    ///  int*   _2 = *_1;
+    ///  int    _3 = *_2;
+    /// ```
+    /// Besides this one variant we've stuck strongly to never nesting `Rhs`,
+    /// so perhaps this should change...
+    Dereference(usize, Box<Rhs>),
     FileScopeVariable(String),
     Literal(Literal),
     Operation(Operation, Variable, Variable),
@@ -65,9 +75,9 @@ pub enum Rhs {
 }
 
 #[derive(Clone)]
-pub enum LValue {
-    Variable(Variable),
-    Dereference(Box<LValue>),
+pub struct LValue {
+    pub var: Variable,
+    pub derefs: usize,
 }
 
 pub enum Step {

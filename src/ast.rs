@@ -1,6 +1,7 @@
 //! This module defines the abstract syntax tree for the language, which is
 //! the form that our source files take after being parsed.
 
+use std::cell::RefCell;
 use std::rc::Rc;
 
 use super::ir;
@@ -37,7 +38,17 @@ pub enum Expression {
     Unit,
     Literal(Literal),
     Variable(String),
-    Dereference(Box<Expression>),
+    /// SAFETY:
+    ///   Because we've flattened `Dereference` to denote number of derefs with a `usize`
+    /// rather than recursively, we end up having to construct new `Dereference`s to recurse
+    /// on: `Dereference(n - 1, expr)`.
+    ///   This means copying around the `Expression` pointer, meaning it needs to be `Rc` and not
+    /// `Box`. Furthermore, because `.typecheck()` takes an `&mut` self reference, we need to have
+    /// a `RefCell` inside the `Rc` to grant us mutable access.
+    ///   We only do one compiler phase at a time, and these extra clones that get created are
+    /// mutably recursed on only once each. Thus we know our `RefCell` won't end up with more than
+    /// one mutable reference. So this use of `Rc<RefCell<Expression>>` is safe.
+    Dereference(usize, Rc<RefCell<Expression>>),
     Operation(
         ir::Operation,
         Box<InferredTypedExpression>,
@@ -55,9 +66,9 @@ pub struct MakeVariable {
 }
 
 #[derive(Debug, Clone)]
-pub enum LValue {
-    Name(String),
-    Dereference(Box<LValue>),
+pub struct LValue {
+    pub name: String,
+    pub derefs: usize,
 }
 
 #[derive(Debug)]

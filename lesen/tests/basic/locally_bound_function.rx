@@ -1,8 +1,8 @@
 function main() -> int {
     var f: func(int) -> int = foo
-    applyAndPrint(5)
+    applyAndPrint(f, 5)
     f = bar
-    applyAndPrint(5)
+    applyAndPrint(f, 5)
     return 0
 }
 

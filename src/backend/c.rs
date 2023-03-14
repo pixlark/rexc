@@ -1,7 +1,6 @@
 //! The C backend for Rexc. This is where IR code gets translated directly
 //! into C code.
 
-use std::borrow::Borrow;
 use std::io::{LineWriter, Result, Write};
 
 use super::super::internal_error::*;
@@ -56,14 +55,11 @@ impl<W: Write> CWriter for LineWriter<W> {
     }
 
     fn lvalue(&mut self, lhs: &LValue) -> EmitResult {
-        match lhs {
-            LValue::Variable(var) => self.variable(*var),
-            LValue::Dereference(interior) => {
-                self.string("*")?;
-                self.lvalue(interior.as_ref())?;
-                Ok(())
-            }
+        for _ in 0..lhs.derefs {
+            self.string("*")?;
         }
+        self.variable(lhs.var)?;
+        Ok(())
     }
 }
 
@@ -181,8 +177,10 @@ impl<W: Write> EmitC<W> for Rhs {
             Rhs::Void => writer.string("0"),
             Rhs::Parameter(s) => writer.string(s),
             Rhs::Variable(var) => writer.variable(*var),
-            Rhs::Dereference(interior) => {
-                writer.string("*")?;
+            Rhs::Dereference(count, interior) => {
+                for _ in 0..*count {
+                    writer.string("*")?;
+                }
                 writer.emit(interior.as_ref())?;
                 Ok(())
             }

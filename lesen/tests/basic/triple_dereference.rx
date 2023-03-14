@@ -1,0 +1,8 @@
+function main() -> int {
+    var x: ***int = alloc(**int)
+    at x = alloc(*int)
+    at at x = alloc(int)
+    at at at x = 5
+    print(at at at x)
+    return 0
+}

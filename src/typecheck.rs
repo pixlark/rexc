@@ -3,10 +3,12 @@
 //! it checks the types as it goes to ensure that all typing in the program is
 //! consistent (no type errors).
 
+use std::cell::RefCell;
 use std::collections::HashMap;
 use std::rc::Rc;
 
 use super::ast;
+use super::internal_error::*;
 use super::ir;
 
 #[derive(Debug)]
@@ -147,6 +149,21 @@ impl ir::Operation {
 }
 
 impl ast::Expression {
+    fn get_deref(&self) -> Result<Rc<RefCell<ast::Expression>>, TypeError> {
+        match self {
+            ast::Expression::Dereference(1, interior) => Ok(interior.clone()),
+            ast::Expression::Dereference(n, interior) => {
+                rexc_assert(*n > 1);
+                Ok(Rc::new(RefCell::new(ast::Expression::Dereference(
+                    *n - 1,
+                    interior.clone(),
+                ))))
+            }
+            _ => Err(TypeError {
+                kind: TypeErrorKind::DereferencedNonPointer,
+            }),
+        }
+    }
     fn typecheck(&mut self, type_map: &mut TypeMap) -> Result<ast::Type, TypeError> {
         match self {
             ast::Expression::Unit => Ok(ast::Type::Unit),
@@ -179,9 +196,11 @@ impl ast::Expression {
                     kind: TypeErrorKind::UnboundVariable(name.clone()),
                 }),
             },
-            ast::Expression::Dereference(interior) => {
-                let interior_type = interior.typecheck(type_map)?;
-                match interior_type {
+            ast::Expression::Dereference(..) => {
+                println!("&mut self: {:#?}", self);
+                let derefed_expression = self.get_deref()?;
+                let derefed_type = derefed_expression.borrow_mut().typecheck(type_map)?;
+                match derefed_type {
                     ast::Type::Pointer(ptr_interior_type) => Ok(*ptr_interior_type),
                     _ => Err(TypeError {
                         kind: TypeErrorKind::DereferencedNonPointer,
@@ -228,16 +247,31 @@ impl ast::Expression {
 }
 
 impl ast::LValue {
+    fn get_deref(&self) -> Result<ast::LValue, TypeError> {
+        if self.derefs == 0 {
+            Err(TypeError {
+                kind: TypeErrorKind::DereferencedNonPointer,
+            })
+        } else {
+            Ok(ast::LValue {
+                name: self.name.clone(),
+                derefs: self.derefs - 1,
+            })
+        }
+    }
     fn typecheck(&mut self, type_map: &TypeMap) -> Result<ast::Type, TypeError> {
-        match self {
-            // TODO(Brooke): Evaluate this `.unwrap()`
-            ast::LValue::Name(name) => Ok(type_map.get(name).unwrap()),
-            ast::LValue::Dereference(interior) => match interior.typecheck(type_map)? {
+        // TODO(Brooke): Evaluate this `.unwrap()`
+        if self.derefs == 0 {
+            Ok(type_map.get(&self.name).unwrap())
+        } else {
+            let mut derefed_lvalue = self.get_deref()?;
+            let derefed_lvalue_type = derefed_lvalue.typecheck(type_map)?;
+            match derefed_lvalue_type {
                 ast::Type::Pointer(interior) => Ok(*interior),
                 _ => Err(TypeError {
                     kind: TypeErrorKind::DereferencedNonPointer,
                 }),
-            },
+            }
         }
     }
 }

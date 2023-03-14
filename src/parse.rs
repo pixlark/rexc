@@ -3,6 +3,9 @@
 use super::ast;
 use super::ir;
 
+use std::cell::RefCell;
+use std::rc::Rc;
+
 /// Nom is *sooo* namespaced that this makes it a little
 /// easier to interact with the stuff I need
 mod nom_wrapper {
@@ -152,12 +155,12 @@ fn dereference(input: &str) -> nom::IResult<&str, ast::Expression> {
         nom::many0_count(ws(nom::tag("at"))),
         nom::alt((alloc_, function_call, atom)),
     )
-    .map(|(deref_count, interior)| {
-        let mut expression = interior;
-        for _ in 0..deref_count {
-            expression = ast::Expression::Dereference(Box::new(expression));
+    .map(|(count, expression)| {
+        if count == 0 {
+            expression
+        } else {
+            ast::Expression::Dereference(count, Rc::new(RefCell::new(expression)))
         }
-        expression
     })
     .parse(input)
 }
@@ -215,7 +218,7 @@ fn function_type(input: &str) -> nom::IResult<&str, ast::Type> {
         nom::opt(nom::preceded(ws(nom::tag("->")), type_annotation)),
     ))
     .map(|(_func, args, returns)| {
-        ast::Type::Function(std::rc::Rc::new((returns.unwrap_or(ast::Type::Unit), args)))
+        ast::Type::Function(Rc::new((returns.unwrap_or(ast::Type::Unit), args)))
     })
     .parse(input)
 }
@@ -300,12 +303,9 @@ fn break_(input: &str) -> nom::IResult<&str, ast::Statement> {
 
 fn lvalue(input: &str) -> nom::IResult<&str, ast::LValue> {
     nom::pair(nom::many0_count(ws(nom::tag("at"))), ws(identifier))
-        .map(|(deref_count, interior)| {
-            let mut lhs = ast::LValue::Name(interior);
-            for _ in 0..deref_count {
-                lhs = ast::LValue::Dereference(Box::new(lhs));
-            }
-            lhs
+        .map(|(count, interior)| ast::LValue {
+            name: interior,
+            derefs: count,
         })
         .parse(input)
 }

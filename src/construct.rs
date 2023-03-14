@@ -3,6 +3,7 @@
 //! by any of the backends.
 
 use std::collections::HashMap;
+use std::rc::Rc;
 
 use super::ast::*;
 use super::internal_error::*;
@@ -198,8 +199,9 @@ impl Expression {
                     }
                 }
             }
-            Expression::Dereference(interior) => {
-                ir::Rhs::Dereference(Box::new(interior.to_ir(ctor, block)))
+            Expression::Dereference(count, interior) => {
+                let moved = Rc::try_unwrap(interior).rexc_unwrap("Somehow an dereference expression reached construction while still having other references alive to its interior!");
+                ir::Rhs::Dereference(count, Box::new(moved.into_inner().to_ir(ctor, block)))
             }
             Expression::Operation(operation, left, right) => {
                 let (left_type, left) = *left;
@@ -258,12 +260,10 @@ impl Expression {
 
 impl LValue {
     fn to_ir(&mut self, ctor: &mut FunctionConstructor) -> ir::LValue {
-        match self {
-            // TODO(Brooke): Evaluate this `.unwrap()`
-            LValue::Name(name) => ir::LValue::Variable(*ctor.variable_map.get(name).unwrap()),
-            LValue::Dereference(interior) => {
-                ir::LValue::Dereference(Box::new(interior.to_ir(ctor)))
-            }
+        let var = *ctor.variable_map.get(&self.name).unwrap();
+        ir::LValue {
+            var,
+            derefs: self.derefs,
         }
     }
 }
