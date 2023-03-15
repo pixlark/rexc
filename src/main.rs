@@ -64,8 +64,19 @@ fn compile(path: std::path::PathBuf, gcc_path: Option<String>, flags: CompileFla
     let mut ast = match parse::file(source_locate) {
         Ok((_, ast)) => ast,
         Err(err) => {
-            parse::SpanInfo::from_err(filename.clone(), err)
-                .exit_with_message(&source, "Parse error somewhere near here!");
+            let err_debug_str = match &err {
+                nom::Err::Incomplete(..) => String::from("Incomplete"),
+                nom::Err::Error(e) => format!("{:?}", e.code),
+                nom::Err::Failure(e) => format!("{:?}", e.code),
+            };
+
+            parse::SpanInfo::from_err(filename.clone(), err).exit_with_message(
+                &source,
+                &format!(
+                    "Parse error somewhere near here! (nom error: {:?})",
+                    &err_debug_str
+                ),
+            );
         }
     };
 
