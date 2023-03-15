@@ -17,7 +17,7 @@ source.exe
 **/.clang-format
 
 # Personal helper scripts
-run-tests.ps1
-generate-stdout.ps1
-build.ps1
-cargo-test.ps1
+*.sh
+
+# Boehm build path
+bdwgc-build/

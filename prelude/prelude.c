@@ -1,8 +1,9 @@
+#include "bdwgc/include/gc.h"
 #include <stdio.h>
 #include <stdlib.h>
 
 void *alloc(size_t size) {
-    return malloc(size);
+    return GC_malloc(size);
 }
 
 void print_unit() {

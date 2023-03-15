@@ -125,15 +125,27 @@ fn compile(path: std::path::PathBuf, gcc_path: Option<String>, flags: CompileFla
     let mut path = std::env::var("PATH").unwrap();
     path.extend(format!(";{}", gcc_dir.to_str().unwrap()).chars());
 
+    let libgc = {
+        let mut path = std::env::current_exe().unwrap();
+        path.pop();
+        path.push("libgc.a");
+        let path = dunce::canonicalize(path).unwrap();
+        path
+    };
+
     command
         .env("PATH", path)
         .arg(emit_path.to_str().unwrap())
+        .arg(libgc)
         .arg("-o")
         .arg(executable_path.to_str().unwrap());
 
     println!("Invoking gcc...\n    {:?}", command);
 
-    command.output().unwrap();
+    let output = command.output().unwrap();
+    if output.status.code() != Some(0) {
+        eprintln!("{}", String::from_utf8_lossy(&output.stderr));
+    }
 }
 
 fn main() {

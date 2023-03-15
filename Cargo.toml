@@ -9,3 +9,7 @@ edition = "2021"
 nom = "7"
 clap = "4"
 bitflags = "1"
+dunce = "1"
+
+[build-dependencies]
+cmake = "0.1"
