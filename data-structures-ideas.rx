@@ -1,0 +1,114 @@
+#
+# Data types can be defined with any number of *fields* and *constructors*:
+#
+data Expr {
+    origin: int
+    data Literal {
+        literal: int
+    }
+    data Variable {
+        variable: int
+    }
+}
+
+#
+# To construct a data type, you specify all fields and exactly one constructor:
+#
+function makeExpr() {
+    var e: Expr = data Expr {
+        origin = 0,
+        data Literal {
+            literal = 1
+        }
+    }
+}
+
+#
+# Data types without any constructors don't need to specify one:
+#
+data Vector2 {
+    x: int
+    y: int
+}
+
+function makeVector2() {
+    var v: Vector2 = data Vector2 {
+        x = 1, y = 2
+    }
+}
+
+#
+# Data types without any *fields* can jump directly to the constructor name:
+#
+data EitherInt {
+    data Left: {
+        value: int
+    }
+    data Right: {
+        value: int
+    }
+}
+
+function makeEitherInt() {
+    var e: EitherInt = data EitherInt.Left {
+        value: 0
+    }
+}
+
+#
+# This can nest as much as you like:
+#
+data NestedDataType {
+    outer_field: int
+    data NestedVariant1 {
+        nested_field: int
+        data SuperNested1 {}
+        data SuperNested2 {
+            innermost_field: int
+        }
+    }
+    data NestedVariant2 {
+        data SuperNested3 {}
+        data SuperNested4 {}
+    }
+}
+
+function makeNestedDataTypes() {
+    var n1: NestedDataType = data NestedDataType {
+        outer_field: 1,
+        data NestedVariant1 {
+            nested_field: 1,
+            data SuperNested1 {}
+        }
+    }
+    var n2: NestedDataType = data NestedDataType {
+        outer_field: 2,
+        data NestedVariant1 {
+            nested_field: 2,
+            data SuperNested2 {
+                innermost_field: 2
+            }
+        }
+    }
+    var n3: NestedDataType = data NestedDataType {
+        outer_field: 3,
+        data NestedVariant2.SuperNested3 {}
+    }
+    # And the same for NestedVariant2.SuperNested4
+}
+
+#
+# To retrieve data from types with variant constructors, you need to pattern match:
+#
+
+function matchExpr() {
+    print(e.origin)
+    match e {
+        data Literal { literal: literal } -> {
+            print(literal)
+        }
+        data Variable { variable: variable } -> {
+            print(variable)
+        }
+    }
+}
