@@ -8,6 +8,7 @@ use std::rc::Rc;
 use super::ast::*;
 use super::internal_error::*;
 use super::ir;
+use super::parse::Span;
 
 #[derive(Debug)]
 pub enum ConstructErrorKind {}
@@ -299,6 +300,7 @@ struct BodyInformation {
     ending_block: ir::BlockLocator,
 }
 
+// TODO(Brooke): This should really take an iterator, not a Vec
 fn body_to_ir(
     body: Vec<Statement>,
     ctor: &mut FunctionConstructor,
@@ -355,7 +357,11 @@ fn body_to_ir(
                 let BodyInformation {
                     starting_block: body_starting_block,
                     ending_block: body_ending_block,
-                } = body_to_ir(if_body, ctor, break_blocks);
+                } = body_to_ir(
+                    if_body.into_iter().map(Span::get).collect(),
+                    ctor,
+                    break_blocks,
+                );
                 // If statement don't have `break`s
                 let post_if_block = ctor.add_block();
 
@@ -413,7 +419,11 @@ fn body_to_ir(
                 let BodyInformation {
                     starting_block: body_starting_block,
                     ending_block: body_ending_block,
-                } = body_to_ir(body, ctor, &mut Some(&mut break_blocks));
+                } = body_to_ir(
+                    body.into_iter().map(Span::get).collect(),
+                    ctor,
+                    &mut Some(&mut break_blocks),
+                );
 
                 ctor.add_unconditional_jump(current_block, body_starting_block);
 
@@ -489,7 +499,11 @@ impl Function {
             .map(|(t, s)| (t.to_ir(), s))
             .collect();
 
-        body_to_ir(self.body, &mut ctor, &mut None);
+        body_to_ir(
+            self.body.into_iter().map(Span::get).collect(),
+            &mut ctor,
+            &mut None,
+        );
 
         ctor.construct()
     }

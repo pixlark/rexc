@@ -7,6 +7,7 @@ edition = "2021"
 
 [dependencies]
 nom = "7"
+nom_locate = "4"
 clap = "4"
 bitflags = "1"
 dunce = "1"

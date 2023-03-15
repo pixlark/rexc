@@ -1,6 +1,6 @@
 {
     "language-extension": "rx",
     "emit-extension": "rx.c",
-    "compile-command": "cargo run compile --source $ --gcc C:\\msys64\\mingw64\\bin\\gcc.exe",
+    "compile-command": "cargo run compile --source $ --gcc \"C:\\msys64\\mingw64\\bin\\gcc.exe\"",
     "compile-command-emit": "cargo run compile --source $ --emit-only"
 }

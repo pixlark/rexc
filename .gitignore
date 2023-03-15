@@ -17,7 +17,6 @@ source.exe
 **/.clang-format
 
 # Personal helper scripts
-*.sh
 
 # Boehm build path
 bdwgc-build/

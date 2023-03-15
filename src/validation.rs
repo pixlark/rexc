@@ -26,7 +26,7 @@ impl Function {
             kind: ValidationErrorKind::NoReturnStatement,
         };
         let last_stmt = self.body.last().ok_or(err.clone())?;
-        match last_stmt {
+        match **last_stmt {
             Statement::Return(..) => Ok(()),
             _ => Err(err),
         }

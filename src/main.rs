@@ -27,6 +27,7 @@ mod ast;
 mod backend;
 mod construct;
 mod desugar;
+mod error;
 mod internal_error;
 mod ir;
 mod parse;
@@ -58,11 +59,13 @@ fn compile(path: std::path::PathBuf, gcc_path: Option<String>, flags: CompileFla
     let source = std::fs::read_to_string(&path).unwrap();
 
     // 1. Parse (Rexc source -> Sugared Untyped AST)
-    let mut ast = match parse::file(&source) {
+    let filename = std::rc::Rc::new(String::from("<main>"));
+    let source_locate = parse::Location::new_extra(&source, filename.clone());
+    let mut ast = match parse::file(source_locate) {
         Ok((_, ast)) => ast,
         Err(err) => {
-            println!("Parse Error!\n  {}", err);
-            return;
+            parse::SpanInfo::from_err(filename.clone(), err)
+                .exit_with_message(&source, "Parse error somewhere near here!");
         }
     };
 
@@ -73,8 +76,8 @@ fn compile(path: std::path::PathBuf, gcc_path: Option<String>, flags: CompileFla
     match ast.typecheck() {
         Ok(()) => {}
         Err(err) => {
-            println!("Type Error!\n  {}", err);
-            return;
+            let msg = format!("{}", *err);
+            err.exit_with_message(&source, &msg);
         }
     }
 
@@ -138,13 +141,16 @@ fn compile(path: std::path::PathBuf, gcc_path: Option<String>, flags: CompileFla
         .arg(emit_path.to_str().unwrap())
         .arg(libgc)
         .arg("-o")
-        .arg(executable_path.to_str().unwrap());
+        .arg(executable_path.to_str().unwrap())
+        .arg("-I")
+        .arg(".");
 
     println!("Invoking gcc...\n    {:?}", command);
 
     let output = command.output().unwrap();
     if output.status.code() != Some(0) {
         eprintln!("{}", String::from_utf8_lossy(&output.stderr));
+        panic!("Aborted compilation!")
     }
 }
 

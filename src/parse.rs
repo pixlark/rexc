@@ -1,6 +1,7 @@
 //! Parse source files into untyped, sugared AST
 
 use super::ast;
+use super::internal_error::*;
 use super::ir;
 
 use std::cell::RefCell;
@@ -27,32 +28,113 @@ mod nom_wrapper {
 use nom_wrapper as nom;
 use nom_wrapper::Parser;
 
+pub type Location<'a> = nom_locate::LocatedSpan<&'a str, Rc<String>>;
+
+#[derive(Debug, Clone)]
+pub struct SpanInfo {
+    pub eof: bool,
+    pub line: Option<usize>,
+    pub column: Option<usize>,
+    pub filename: Rc<String>,
+}
+
+#[derive(Debug, Clone)]
+pub struct Span<T> {
+    pub inner: T,
+    pub info: Option<SpanInfo>,
+}
+
+impl SpanInfo {
+    fn eof(filename: Rc<String>) -> SpanInfo {
+        SpanInfo {
+            eof: true,
+            line: None,
+            column: None,
+            filename: filename,
+        }
+    }
+}
+
+impl SpanInfo {
+    pub fn from_err(
+        filename: Rc<String>,
+        err: nom::Err<nom::error::Error<Location<'_>>>,
+    ) -> SpanInfo {
+        let err = match err {
+            nom::Err::Incomplete(..) => {
+                return SpanInfo::eof(filename);
+            }
+            nom::Err::Error(e) => e,
+            nom::Err::Failure(e) => e,
+        };
+        let (input, position) =
+            nom_locate::position::<Location, nom::error::Error<Location>>(err.input).unwrap();
+        SpanInfo {
+            eof: false,
+            line: Some(position.location_line() as usize),
+            column: Some(position.get_utf8_column()),
+            filename: position.extra.clone(),
+        }
+    }
+}
+
+impl<T> Span<T> {
+    pub fn new(inner: T, info: Option<SpanInfo>) -> Span<T> {
+        Span { inner, info }
+    }
+    pub fn generated(inner: T) -> Span<T> {
+        Span { inner, info: None }
+    }
+    pub fn get(self) -> T {
+        self.inner
+    }
+    pub fn nil(&self) -> Span<()> {
+        Span {
+            inner: (),
+            info: self.info.clone(),
+        }
+    }
+}
+
+impl<T> std::ops::Deref for Span<T> {
+    type Target = T;
+    fn deref(&self) -> &T {
+        &self.inner
+    }
+}
+
+impl<T> std::ops::DerefMut for Span<T> {
+    fn deref_mut(&mut self) -> &mut T {
+        &mut self.inner
+    }
+}
+
 /// Taken from <https://github.com/rust-bakery/nom/blob/main/doc/nom_recipes.md>
-fn ws<'a, F, O, E: nom::ParseError<&'a str>>(
+fn ws<'a, F, O, E: nom::ParseError<Location<'a>>>(
     inner: F,
-) -> impl FnMut(&'a str) -> nom::IResult<&'a str, O, E>
+) -> impl FnMut(Location<'a>) -> nom::IResult<Location<'a>, O, E>
 where
-    F: FnMut(&'a str) -> nom::IResult<&'a str, O, E>,
+    F: FnMut(Location<'a>) -> nom::IResult<Location<'a>, O, E>,
 {
     //nom::delimited(nom::multispace0, inner, nom::multispace0)
     nom::preceded(nom::multispace0, inner)
 }
 
-fn non_line_ws<'a, F, O, E: nom::ParseError<&'a str>>(
+fn non_line_ws<'a, F, O, E: nom::ParseError<Location<'a>>>(
     inner: F,
-) -> impl FnMut(&'a str) -> nom::IResult<&'a str, O, E>
+) -> impl FnMut(Location<'a>) -> nom::IResult<Location<'a>, O, E>
 where
-    F: FnMut(&'a str) -> nom::IResult<&'a str, O, E>,
+    F: FnMut(Location<'a>) -> nom::IResult<Location<'a>, O, E>,
 {
     //nom::delimited(nom::space0, inner, nom::space0)
     nom::preceded(nom::space0, inner)
 }
 
-fn integer(input: &str) -> nom::IResult<&str, i64> {
+fn integer(input: Location) -> nom::IResult<Location, i64> {
     nom::i64(input)
 }
 
-fn identifier(input: &str) -> nom::IResult<&str, String> {
+fn identifier(input: Location) -> nom::IResult<Location, String> {
     let (input, leading) = nom::alt((nom::char('_'), nom::satisfy(char::is_alphabetic)))(input)?;
     let (input, mut ident) = nom::many0(nom::alt((
         nom::char('_'),
@@ -65,15 +147,15 @@ fn identifier(input: &str) -> nom::IResult<&str, String> {
     Ok((input, ident))
 }
 
-fn true_(input: &str) -> nom::IResult<&str, ()> {
+fn true_(input: Location) -> nom::IResult<Location, ()> {
     nom::tag("true")(input).map(|(i, _)| (i, ()))
 }
 
-fn false_(input: &str) -> nom::IResult<&str, ()> {
+fn false_(input: Location) -> nom::IResult<Location, ()> {
     nom::tag("false")(input).map(|(i, _)| (i, ()))
 }
 
-fn atom(input: &str) -> nom::IResult<&str, ast::Expression> {
+fn atom(input: Location) -> nom::IResult<Location, ast::Expression> {
     nom::alt((
         nom::map(ws(true_), |_| {
             ast::Expression::Literal(ast::Literal::Bool(true))
@@ -89,11 +171,11 @@ fn atom(input: &str) -> nom::IResult<&str, ast::Expression> {
     ))(input)
 }
 
-fn arguments(input: &str) -> nom::IResult<&str, Vec<ast::Expression>> {
+fn arguments(input: Location) -> nom::IResult<Location, Vec<ast::Expression>> {
     nom::separated_list0(ws(nom::char(',')), expression).parse(input)
 }
 
-fn alloc_(input: &str) -> nom::IResult<&str, ast::Expression> {
+fn alloc_(input: Location) -> nom::IResult<Location, ast::Expression> {
     nom::preceded(
         ws(nom::tag("alloc")),
         nom::delimited(ws(nom::char('(')), expression, ws(nom::char(')'))),
@@ -102,7 +184,7 @@ fn alloc_(input: &str) -> nom::IResult<&str, ast::Expression> {
     .parse(input)
 }
 
-fn function_call(input: &str) -> nom::IResult<&str, ast::Expression> {
+fn function_call(input: Location) -> nom::IResult<Location, ast::Expression> {
     nom::pair(
         ws(identifier),
         nom::delimited(ws(nom::char('(')), arguments, ws(nom::char(')'))),
@@ -120,13 +202,16 @@ fn function_call(input: &str) -> nom::IResult<&str, ast::Expression> {
 /// TODO(Brooke): Clean this up, it's probably more complicated than it needs to be.
 macro_rules! left_assoc_operator {
     ($name:ident, $sep:expr, $sub: expr) => {
-        fn $name(input: &str) -> nom::IResult<&str, ast::Expression> {
+        fn $name(input: Location) -> nom::IResult<Location, ast::Expression> {
             let (i, list) = {
                 let mut list = Vec::new();
                 let (mut i, start) = $sub.parse(input)?;
                 list.push((None, start));
                 loop {
-                    match nom::pair($sep, $sub).map(|(a, b)| (Some(a), b)).parse(i) {
+                    match nom::pair($sep, $sub)
+                        .map(|(a, b)| (Some(a), b))
+                        .parse(i.clone())
+                    {
                         Ok((i_, pair)) => {
                             i = i_;
                             list.push(pair);
@@ -150,7 +235,7 @@ macro_rules! left_assoc_operator {
     };
 }
 
-fn dereference(input: &str) -> nom::IResult<&str, ast::Expression> {
+fn dereference(input: Location) -> nom::IResult<Location, ast::Expression> {
     nom::pair(
         nom::many0_count(ws(nom::tag("at"))),
         nom::alt((alloc_, function_call, atom)),
@@ -203,11 +288,11 @@ left_assoc_operator! {
     comparative_operators
 }
 
-fn expression(input: &str) -> nom::IResult<&str, ast::Expression> {
+fn expression(input: Location) -> nom::IResult<Location, ast::Expression> {
     equality_operators.parse(input)
 }
 
-fn function_type(input: &str) -> nom::IResult<&str, ast::Type> {
+fn function_type(input: Location) -> nom::IResult<Location, ast::Type> {
     nom::tuple((
         ws(nom::tag("func")),
         nom::delimited(
@@ -223,7 +308,7 @@ fn function_type(input: &str) -> nom::IResult<&str, ast::Type> {
     .parse(input)
 }
 
-fn type_annotation(input: &str) -> nom::IResult<&str, ast::Type> {
+fn type_annotation(input: Location) -> nom::IResult<Location, ast::Type> {
     nom::pair(
         nom::many0_count(ws(nom::char('*'))),
         nom::alt((
@@ -242,7 +327,7 @@ fn type_annotation(input: &str) -> nom::IResult<&str, ast::Type> {
     .parse(input)
 }
 
-fn var_decl(input: &str) -> nom::IResult<&str, ast::Statement> {
+fn var_decl(input: Location) -> nom::IResult<Location, ast::Statement> {
     nom::tuple((
         ws(nom::tag("var")),
         ws(identifier),
@@ -261,7 +346,7 @@ fn var_decl(input: &str) -> nom::IResult<&str, ast::Statement> {
     .parse(input)
 }
 
-fn return_(input: &str) -> nom::IResult<&str, ast::Statement> {
+fn return_(input: Location) -> nom::IResult<Location, ast::Statement> {
     nom::tuple((ws(nom::tag("return")), nom::opt(expression)))
         .map(|(_ret, expression)| {
             ast::Statement::Return((None, expression.unwrap_or(ast::Expression::Unit)))
@@ -269,7 +354,7 @@ fn return_(input: &str) -> nom::IResult<&str, ast::Statement> {
         .parse(input)
 }
 
-fn if_(input: &str) -> nom::IResult<&str, ast::Statement> {
+fn if_(input: Location) -> nom::IResult<Location, ast::Statement> {
     nom::tuple((ws(nom::tag("if")), expression, body))
         .map(|(_if, condition, body)| {
             ast::Statement::If(ast::If {
@@ -280,7 +365,7 @@ fn if_(input: &str) -> nom::IResult<&str, ast::Statement> {
         .parse(input)
 }
 
-fn print_(input: &str) -> nom::IResult<&str, ast::Statement> {
+fn print_(input: Location) -> nom::IResult<Location, ast::Statement> {
     nom::preceded(
         ws(nom::tag("print")),
         nom::delimited(ws(nom::char('(')), expression, ws(nom::char(')'))),
@@ -289,19 +374,19 @@ fn print_(input: &str) -> nom::IResult<&str, ast::Statement> {
     .parse(input)
 }
 
-fn loop_(input: &str) -> nom::IResult<&str, ast::Statement> {
+fn loop_(input: Location) -> nom::IResult<Location, ast::Statement> {
     nom::preceded(ws(nom::tag("loop")), body)
         .map(|body| ast::Statement::Loop(body))
         .parse(input)
 }
 
-fn break_(input: &str) -> nom::IResult<&str, ast::Statement> {
+fn break_(input: Location) -> nom::IResult<Location, ast::Statement> {
     ws(nom::tag("break"))
         .map(|_break| ast::Statement::Break)
         .parse(input)
 }
 
-fn lvalue(input: &str) -> nom::IResult<&str, ast::LValue> {
+fn lvalue(input: Location) -> nom::IResult<Location, ast::LValue> {
     nom::pair(nom::many0_count(ws(nom::tag("at"))), ws(identifier))
         .map(|(count, interior)| ast::LValue {
             name: interior,
@@ -310,7 +395,7 @@ fn lvalue(input: &str) -> nom::IResult<&str, ast::LValue> {
         .parse(input)
 }
 
-fn var_set(input: &str) -> nom::IResult<&str, ast::Statement> {
+fn var_set(input: Location) -> nom::IResult<Location, ast::Statement> {
     nom::tuple((lvalue, ws(nom::char('=')), expression))
         .map(|(lhs, _equals, expression)| {
             ast::Statement::SetVariable(ast::SetVariable {
@@ -321,14 +406,23 @@ fn var_set(input: &str) -> nom::IResult<&str, ast::Statement> {
         .parse(input)
 }
 
-fn bare_expression(input: &str) -> nom::IResult<&str, ast::Statement> {
+fn bare_expression(input: Location) -> nom::IResult<Location, ast::Statement> {
     expression
         .map(|expr| ast::Statement::BareExpression((None, expr)))
         .parse(input)
 }
 
-fn statement(input: &str) -> nom::IResult<&str, ast::Statement> {
-    nom::alt((
+fn statement(input: Location) -> nom::IResult<Location, Span<ast::Statement>> {
+    let (input, _) = nom::multispace0::<Location, nom::error::Error<Location>>(input).unwrap();
+    let (input, start_location) =
+        nom_locate::position::<Location, nom::error::Error<Location>>(input).unwrap();
+    let span_info = SpanInfo {
+        eof: false,
+        line: Some(start_location.location_line() as usize),
+        column: Some(start_location.get_utf8_column()),
+        filename: start_location.extra.clone(),
+    };
+    let (input, stmt) = nom::alt((
         var_decl,
         return_,
         if_,
@@ -338,10 +432,11 @@ fn statement(input: &str) -> nom::IResult<&str, ast::Statement> {
         var_set,
         bare_expression,
     ))
-    .parse(input)
+    .parse(input)?;
+    Ok((input, Span::new(stmt, Some(span_info))))
 }
 
-fn body(input: &str) -> nom::IResult<&str, Vec<ast::Statement>> {
+fn body(input: Location) -> nom::IResult<Location, Vec<Span<ast::Statement>>> {
     nom::delimited(
         ws(nom::char('{')),
         nom::separated_list0(non_line_ws(nom::line_ending), statement),
@@ -350,7 +445,7 @@ fn body(input: &str) -> nom::IResult<&str, Vec<ast::Statement>> {
     .parse(input)
 }
 
-fn parameters(input: &str) -> nom::IResult<&str, Vec<(ast::Type, String)>> {
+fn parameters(input: Location) -> nom::IResult<Location, Vec<(ast::Type, String)>> {
     nom::separated_list0(
         ws(nom::char(',')),
         nom::tuple((ws(identifier), ws(nom::char(':')), ws(type_annotation))),
@@ -363,7 +458,7 @@ fn parameters(input: &str) -> nom::IResult<&str, Vec<(ast::Type, String)>> {
     .parse(input)
 }
 
-pub fn function(input: &str) -> nom::IResult<&str, ast::Function> {
+pub fn function(input: Location) -> nom::IResult<Location, ast::Function> {
     nom::tuple((
         ws(nom::tag("function")),
         ws(identifier),
@@ -382,16 +477,16 @@ pub fn function(input: &str) -> nom::IResult<&str, ast::Function> {
     .parse(input)
 }
 
-pub fn file(mut input: &str) -> nom::IResult<&str, ast::File> {
+pub fn file(mut input: Location) -> nom::IResult<Location, ast::File> {
     let mut functions = Vec::new();
     loop {
-        let (i, function) = match function.parse(input) {
+        let (i, function) = match function.parse(input.clone()) {
             Ok(res) => res,
             // Kind of a hack!!
             Err(e) => {
                 if e.is_incomplete()
-                    && ws(nom::eof::<&str, nom::error::Error<&str>>)
-                        .parse(input)
+                    && ws(nom::eof::<Location, nom::error::Error<Location>>)
+                        .parse(input.clone())
                         .is_ok()
                 {
                     break;
@@ -411,14 +506,15 @@ fn test_parse() {
     println!();
     println!(
         "{:#?}",
-        body(
+        body(Location::new_extra(
             "{
     var ptr: int = 5
     *ptr = 5
     print(*ptr)
 
     return 0
-}"
-        )
+}",
+            Rc::new(String::from("<main>"))
+        ))
     );
 }

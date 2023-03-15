@@ -5,6 +5,7 @@ use std::cell::RefCell;
 use std::rc::Rc;
 
 use super::ir;
+use super::parse::Span;
 
 /// Type is special in our AST because many different
 /// instances of `Type` might point to the same "underlying"
@@ -80,7 +81,7 @@ pub struct SetVariable {
 #[derive(Debug)]
 pub struct If {
     pub condition: InferredTypedExpression,
-    pub body: Vec<Statement>,
+    pub body: Vec<Span<Statement>>,
 }
 
 #[derive(Debug)]
@@ -90,7 +91,7 @@ pub enum Statement {
     SetVariable(SetVariable),
     Return(InferredTypedExpression),
     If(If),
-    Loop(Vec<Statement>),
+    Loop(Vec<Span<Statement>>),
     Break,
     // NOTE: Temporary, eventually print will be function in the standard
     //       library. Right now it's built-in just so we can get up and running
@@ -103,7 +104,7 @@ pub struct Function {
     pub name: String,
     pub parameters: Vec<(Type, String)>,
     pub returns: Type,
-    pub body: Vec<Statement>,
+    pub body: Vec<Span<Statement>>,
 }
 
 #[derive(Debug)]

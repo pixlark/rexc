@@ -13,6 +13,7 @@
 # from parsing into an AST.
 
 import argparse
+import colorama
 import difflib
 import json
 import os
@@ -20,6 +21,8 @@ import os.path
 import subprocess
 import sys
 from termcolor import colored, cprint
+
+colorama.just_fix_windows_console()
 
 def print_at_depth(depth, s):
     print('\n'.join(map(lambda c: "  "*depth + c, s.split('\n'))))
