@@ -8,7 +8,6 @@ use std::rc::Rc;
 use super::ast::*;
 use super::internal_error::*;
 use super::ir;
-use super::parse::Span;
 
 #[derive(Debug)]
 pub enum ConstructErrorKind {}
@@ -160,29 +159,29 @@ impl FunctionConstructor<'_> {
 }
 
 impl Type {
-    fn to_ir(&self) -> ir::Type {
+    fn into_ir(&self) -> ir::Type {
         match self {
             Type::Unit => ir::Type::Void,
             Type::Int => ir::Type::Int,
             Type::Bool => ir::Type::Int,
-            Type::Pointer(type_) => ir::Type::Pointer(Box::new(type_.to_ir())),
+            Type::Pointer(type_) => ir::Type::Pointer(Box::new(type_.into_ir())),
             Type::Function(rc) => ir::Type::Function(std::rc::Rc::new((
-                rc.0.to_ir(),
-                rc.1.iter().map(|t| t.to_ir()).collect(),
+                rc.0.into_ir(),
+                rc.1.iter().map(|t| t.into_ir()).collect(),
             ))),
         }
     }
 }
 
 impl Expression {
-    fn to_ir(self, ctor: &mut FunctionConstructor, block: ir::BlockLocator) -> ir::Rhs {
-        match self {
-            Expression::Unit => ir::Rhs::Void,
-            Expression::Literal(literal) => match literal {
+    fn into_ir(self, ctor: &mut FunctionConstructor, block: ir::BlockLocator) -> ir::Rhs {
+        match self.kind {
+            ExpressionKind::Unit => ir::Rhs::Void,
+            ExpressionKind::Literal(literal) => match literal {
                 Literal::Int(i) => ir::Rhs::Literal(ir::Literal::Int(i)),
                 Literal::Bool(b) => ir::Rhs::Literal(ir::Literal::Int(if b { 1 } else { 0 })),
             },
-            Expression::Variable(name) => {
+            ExpressionKind::Variable(name) => {
                 if ctor.file_scope_variables.contains(&name) {
                     ir::Rhs::FileScopeVariable(name.clone())
                 } else {
@@ -200,39 +199,39 @@ impl Expression {
                     }
                 }
             }
-            Expression::Dereference(count, interior) => {
+            ExpressionKind::Dereference(count, interior) => {
                 let moved = Rc::try_unwrap(interior).rexc_unwrap("Somehow an dereference expression reached construction while still having other references alive to its interior!");
-                ir::Rhs::Dereference(count, Box::new(moved.into_inner().to_ir(ctor, block)))
+                ir::Rhs::Dereference(count, Box::new(moved.into_inner().into_ir(ctor, block)))
             }
-            Expression::Operation(operation, left, right) => {
+            ExpressionKind::Operation(operation, left, right) => {
                 let (left_type, left) = *left;
                 let (right_type, right) = *right;
                 // Create SSA assignment chain for left expression
-                let left_rhs = left.to_ir(ctor, block);
+                let left_rhs = left.into_ir(ctor, block);
                 let left = ctor.add_assignment(
                     block,
-                    left_type.rexc_unwrap("Somehow the left side of an operation passed the typechecker without having a type filled in!").to_ir(),
+                    left_type.rexc_unwrap("Somehow the left side of an operation passed the typechecker without having a type filled in!").into_ir(),
                     left_rhs
                 );
                 // Create SSA assignment chain for right expression
-                let right_rhs = right.to_ir(ctor, block);
+                let right_rhs = right.into_ir(ctor, block);
                 let right = ctor.add_assignment(
                     block,
-                    right_type.rexc_unwrap("Somehow the right side of an operation passed the typechecker without having a type filled in!").to_ir(),
+                    right_type.rexc_unwrap("Somehow the right side of an operation passed the typechecker without having a type filled in!").into_ir(),
                     right_rhs
                 );
                 // Return new RHS which uses those chains
                 ir::Rhs::Operation(operation, left, right)
             }
-            Expression::FunctionCall(type_, name, arguments) => {
+            ExpressionKind::FunctionCall(type_, name, arguments) => {
                 let _type = type_.rexc_unwrap("Somehow a function call passed the typechecker without having a type filled in!");
 
                 // Create SSA assignment chain for each argument
                 let mut arg_vars = Vec::new();
                 for (arg_type, argument) in arguments {
                     let arg_type = arg_type.rexc_unwrap("Somehow a function call's argument passed the typechecker without having a type filled in!");
-                    let arg_type = arg_type.to_ir();
-                    let rhs = argument.to_ir(ctor, block);
+                    let arg_type = arg_type.into_ir();
+                    let rhs = argument.into_ir(ctor, block);
                     arg_vars.push(ctor.add_assignment(block, arg_type, rhs));
                 }
 
@@ -247,10 +246,10 @@ impl Expression {
                     ir::Rhs::FunctionCall(ir::FunctionReference::FileScope(name), arg_vars)
                 }
             }
-            Expression::Allocate(ite) => {
+            ExpressionKind::Allocate(ite) => {
                 let (type_, expr) = *ite;
                 let type_ = type_.rexc_unwrap("Somehow an alloc expression got past the typechecker without having its type filled in!");
-                let type_ir = type_.to_ir();
+                let type_ir = type_.into_ir();
 
                 // Allocate the space
                 let sizeof =
@@ -265,7 +264,7 @@ impl Expression {
                 );
 
                 // Create the initial value
-                let rhs = expr.to_ir(ctor, block);
+                let rhs = expr.into_ir(ctor, block);
                 let value = ctor.add_assignment(block, type_ir.clone(), rhs);
 
                 // Assign the value to the allocated pointer
@@ -286,7 +285,7 @@ impl Expression {
 }
 
 impl LValue {
-    fn to_ir(&mut self, ctor: &mut FunctionConstructor) -> ir::LValue {
+    fn into_ir(&mut self, ctor: &mut FunctionConstructor) -> ir::LValue {
         let var = *ctor.variable_map.get(&self.name).unwrap();
         ir::LValue {
             var,
@@ -301,7 +300,7 @@ struct BodyInformation {
 }
 
 // TODO(Brooke): This should really take an iterator, not a Vec
-fn body_to_ir(
+fn body_into_ir(
     body: Vec<Statement>,
     ctor: &mut FunctionConstructor,
     break_blocks: &mut Option<&mut Vec<ir::BlockLocator>>,
@@ -310,58 +309,54 @@ fn body_to_ir(
     let mut current_block = starting_block;
 
     for statement in body {
-        match statement {
-            Statement::BareExpression((type_, expression)) => {
+        match statement.kind {
+            StatementKind::BareExpression((type_, expression)) => {
                 let _type = type_.rexc_unwrap("Somehow a bare expression passed the typechecker without its type being filled in!")
-                    .to_ir();
-                let rhs = expression.to_ir(ctor, current_block);
+                    .into_ir();
+                let rhs = expression.into_ir(ctor, current_block);
 
                 ctor.add_discarded_value(current_block, rhs);
             }
-            Statement::MakeVariable(MakeVariable { type_, lhs, rhs }) => {
-                let ir_rhs = rhs.to_ir(ctor, current_block);
-                let index = ctor.add_assignment(current_block, type_.to_ir(), ir_rhs);
+            StatementKind::MakeVariable(MakeVariable { type_, lhs, rhs }) => {
+                let ir_rhs = rhs.into_ir(ctor, current_block);
+                let index = ctor.add_assignment(current_block, type_.into_ir(), ir_rhs);
                 ctor.variable_map.insert(lhs, index);
             }
-            Statement::SetVariable(SetVariable {
+            StatementKind::SetVariable(SetVariable {
                 mut lhs,
                 rhs: (_type, rhs),
             }) => {
-                let ir_rhs = rhs.to_ir(ctor, current_block);
+                let ir_rhs = rhs.into_ir(ctor, current_block);
                 /*let ir_lhs = ctor.variable_map.get_lvalue(&lhs)
                 .rexc_unwrap("Somehow a bad variable assignment passed the typechecker without UnboundVariable being thrown!");*/
-                let ir_lhs = lhs.to_ir(ctor);
+                let ir_lhs = lhs.into_ir(ctor);
 
                 ctor.add_reassignment(current_block, ir_lhs, ir_rhs);
             }
-            Statement::Return((type_, expression)) => {
+            StatementKind::Return((type_, expression)) => {
                 let type_ = type_.rexc_unwrap("Somehow a return statement passed the typechecker without its type being filled in!");
-                let rhs = expression.to_ir(ctor, current_block);
-                let type_ir = type_.to_ir();
+                let rhs = expression.into_ir(ctor, current_block);
+                let type_ir = type_.into_ir();
                 let index = ctor.add_assignment(current_block, type_ir.clone(), rhs);
                 ctor.add_return(current_block, type_ir, index);
                 // If we don't break we might continue the loop and start constructing
                 // unreachable post-return code!
                 break;
             }
-            Statement::If(If {
+            StatementKind::If(If {
                 condition: (type_, condition),
                 body: if_body,
             }) => {
                 let type_ = type_.rexc_unwrap("Somehow an if condition passed the typechecker without its type being filled in!");
-                let rhs = condition.to_ir(ctor, current_block);
-                let type_ir = type_.to_ir();
+                let rhs = condition.into_ir(ctor, current_block);
+                let type_ir = type_.into_ir();
                 let index = ctor.add_assignment(current_block, type_ir.clone(), rhs);
 
                 // Construct body of if statement, which can be an arbitrary number of blocks
                 let BodyInformation {
                     starting_block: body_starting_block,
                     ending_block: body_ending_block,
-                } = body_to_ir(
-                    if_body.into_iter().map(Span::get).collect(),
-                    ctor,
-                    break_blocks,
-                );
+                } = body_into_ir(if_body.into_iter().collect(), ctor, break_blocks);
                 // If statement don't have `break`s
                 let post_if_block = ctor.add_block();
 
@@ -412,15 +407,15 @@ fn body_to_ir(
 
                 current_block = post_if_block;
             }
-            Statement::Loop(body) => {
+            StatementKind::Loop(body) => {
                 let mut break_blocks = Vec::new();
 
                 // Construct body of loop statement, which can be an arbitrary number of blocks
                 let BodyInformation {
                     starting_block: body_starting_block,
                     ending_block: body_ending_block,
-                } = body_to_ir(
-                    body.into_iter().map(Span::get).collect(),
+                } = body_into_ir(
+                    body.into_iter().collect(),
                     ctor,
                     &mut Some(&mut break_blocks),
                 );
@@ -455,14 +450,14 @@ fn body_to_ir(
 
                 current_block = post_loop_block;
             }
-            Statement::Break => {
-                break_blocks.as_mut().rexc_unwrap("Somehow a break statement was reached wihout a `break_blocks` argument being passed to `body_to_ir`.").push(current_block);
+            StatementKind::Break => {
+                break_blocks.as_mut().rexc_unwrap("Somehow a break statement was reached wihout a `break_blocks` argument being passed to `body_into_ir`.").push(current_block);
                 ctor.add_unfilled_branch(current_block);
                 // If we don't break we might continue the loop and start constructing
                 // unreachable post-break code!
                 break;
             }
-            Statement::Print((type_, expression)) => {
+            StatementKind::Print((type_, expression)) => {
                 let type_ = type_.rexc_unwrap("Somehow a print statement passed the typechecker without its type being filled in!");
                 let prelude_function_name = String::from(match type_ {
                     Type::Unit => "print_unit",
@@ -472,8 +467,8 @@ fn body_to_ir(
                     Type::Function(..) => unimplemented!(),
                 });
 
-                let rhs = expression.to_ir(ctor, current_block);
-                let index = ctor.add_assignment(current_block, type_.to_ir(), rhs);
+                let rhs = expression.into_ir(ctor, current_block);
+                let index = ctor.add_assignment(current_block, type_.into_ir(), rhs);
                 ctor.add_void_function_call(current_block, prelude_function_name, vec![index]);
             }
         }
@@ -486,31 +481,27 @@ fn body_to_ir(
 }
 
 impl Function {
-    pub fn to_ir(self, file_scope_variables: &[String]) -> ir::Function {
+    pub fn into_ir(self, file_scope_variables: &[String]) -> ir::Function {
         let mut ctor = FunctionConstructor::new(self.name.clone(), file_scope_variables);
 
         ctor.returns = Some(match self.returns {
             Type::Unit => ir::Type::Void,
-            _ => self.returns.to_ir(),
+            _ => self.returns.into_ir(),
         });
         ctor.parameters = self
             .parameters
             .into_iter()
-            .map(|(t, s)| (t.to_ir(), s))
+            .map(|(t, s)| (t.into_ir(), s))
             .collect();
 
-        body_to_ir(
-            self.body.into_iter().map(Span::get).collect(),
-            &mut ctor,
-            &mut None,
-        );
+        body_into_ir(self.body.into_iter().collect(), &mut ctor, &mut None);
 
         ctor.construct()
     }
 }
 
 impl File {
-    pub fn to_ir(self) -> ir::CompilationUnit {
+    pub fn into_ir(self) -> ir::CompilationUnit {
         let file_scope_variables = self
             .functions
             .iter()
@@ -522,7 +513,7 @@ impl File {
         for function in self.functions {
             compilation_unit
                 .functions
-                .push(function.to_ir(&file_scope_variables));
+                .push(function.into_ir(&file_scope_variables));
         }
         compilation_unit
     }

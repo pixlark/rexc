@@ -34,6 +34,8 @@ mod parse;
 mod typecheck;
 mod validation;
 
+use std::rc::Rc;
+
 use bitflags::bitflags;
 
 use backend::c::EmitC;
@@ -56,27 +58,28 @@ fn compile(path: std::path::PathBuf, gcc_path: Option<String>, flags: CompileFla
         panic!("Bad source file extension (expected .rx)")
     }
 
-    let source = std::fs::read_to_string(&path).unwrap();
+    let source = Rc::new(std::fs::read_to_string(&path).unwrap());
 
     // 1. Parse (Rexc source -> Sugared Untyped AST)
-    let filename = std::rc::Rc::new(String::from("<main>"));
-    let source_locate = parse::Location::new_extra(&source, filename.clone());
-    let mut ast = match parse::file(source_locate) {
-        Ok((_, ast)) => ast,
+    let filename = Rc::new(String::from("<main>"));
+    //let source_locate = parse::Location::new_extra(&source, filename.clone());
+    let lexer = match parse::Lexer::new(source, filename) {
+        Ok(lexer) => lexer,
         Err(err) => {
-            let err_debug_str = match &err {
-                nom::Err::Incomplete(..) => String::from("Incomplete"),
-                nom::Err::Error(e) => format!("{:?}", e.code),
-                nom::Err::Failure(e) => format!("{:?}", e.code),
-            };
-
-            parse::SpanInfo::from_err(filename.clone(), err).exit_with_message(
-                &source,
-                &format!(
-                    "Parse error somewhere near here! (nom error: {:?})",
-                    &err_debug_str
-                ),
-            );
+            eprintln!("Parse error! Originated at:");
+            err.span.error_message();
+            eprintln!("  {}", err.kind);
+            return;
+        }
+    };
+    let mut parser = parse::Parser::new(lexer);
+    let mut ast = match parser.file() {
+        Ok(ast) => ast,
+        Err(err) => {
+            eprintln!("Parse error! Originated at:");
+            err.span.error_message();
+            eprintln!("  {}", err.kind);
+            return;
         }
     };
 
@@ -87,8 +90,10 @@ fn compile(path: std::path::PathBuf, gcc_path: Option<String>, flags: CompileFla
     match ast.typecheck() {
         Ok(()) => {}
         Err(err) => {
-            let msg = format!("{}", *err);
-            err.exit_with_message(&source, &msg);
+            eprintln!("Type error! Originated at:");
+            err.span.error_message();
+            eprintln!("  {}", err);
+            return;
         }
     }
 
@@ -96,13 +101,15 @@ fn compile(path: std::path::PathBuf, gcc_path: Option<String>, flags: CompileFla
     match ast.validate() {
         Ok(()) => {}
         Err(err) => {
-            println!("Error!\n  {}", err);
+            eprintln!("Error! Originated at:");
+            err.span.error_message();
+            eprintln!("  {}", err);
             return;
         }
     }
 
     // 5. Construct (Desugared Typed AST -> IR)
-    let ir_ = ast.to_ir();
+    let ir_ = ast.into_ir();
 
     // 6. Emit (IR -> C source)
     let mut writer = std::io::LineWriter::new(Vec::new());

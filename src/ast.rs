@@ -35,7 +35,7 @@ pub enum Literal {
 }
 
 #[derive(Debug)]
-pub enum Expression {
+pub enum ExpressionKind {
     Unit,
     Literal(Literal),
     Variable(String),
@@ -60,6 +60,18 @@ pub enum Expression {
 }
 
 #[derive(Debug)]
+pub struct Expression {
+    pub kind: ExpressionKind,
+    pub span: Span,
+}
+
+impl Expression {
+    pub fn new(kind: ExpressionKind, span: Span) -> Expression {
+        Expression { kind, span }
+    }
+}
+
+#[derive(Debug)]
 pub struct MakeVariable {
     pub type_: Type,
     pub lhs: String,
@@ -81,17 +93,17 @@ pub struct SetVariable {
 #[derive(Debug)]
 pub struct If {
     pub condition: InferredTypedExpression,
-    pub body: Vec<Span<Statement>>,
+    pub body: Vec<Statement>,
 }
 
 #[derive(Debug)]
-pub enum Statement {
+pub enum StatementKind {
     BareExpression(InferredTypedExpression),
     MakeVariable(MakeVariable),
     SetVariable(SetVariable),
     Return(InferredTypedExpression),
     If(If),
-    Loop(Vec<Span<Statement>>),
+    Loop(Vec<Statement>),
     Break,
     // NOTE: Temporary, eventually print will be function in the standard
     //       library. Right now it's built-in just so we can get up and running
@@ -100,11 +112,24 @@ pub enum Statement {
 }
 
 #[derive(Debug)]
+pub struct Statement {
+    pub kind: StatementKind,
+    pub span: Span,
+}
+
+impl Statement {
+    pub fn new(kind: StatementKind, span: Span) -> Statement {
+        Statement { kind, span }
+    }
+}
+
+#[derive(Debug)]
 pub struct Function {
     pub name: String,
     pub parameters: Vec<(Type, String)>,
     pub returns: Type,
-    pub body: Vec<Span<Statement>>,
+    pub body: Vec<Statement>,
+    pub span: Span,
 }
 
 #[derive(Debug)]

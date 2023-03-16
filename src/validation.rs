@@ -1,4 +1,5 @@
 use super::ast::*;
+use super::parse::Span;
 
 #[derive(Debug, Clone)]
 pub enum ValidationErrorKind {
@@ -7,7 +8,8 @@ pub enum ValidationErrorKind {
 
 #[derive(Debug, Clone)]
 pub struct ValidationError {
-    kind: ValidationErrorKind,
+    pub kind: ValidationErrorKind,
+    pub span: Span,
 }
 
 impl std::fmt::Display for ValidationError {
@@ -24,10 +26,11 @@ impl Function {
     fn no_return_statement(&self) -> Result<(), ValidationError> {
         let err = ValidationError {
             kind: ValidationErrorKind::NoReturnStatement,
+            span: self.span.clone(),
         };
         let last_stmt = self.body.last().ok_or(err.clone())?;
-        match **last_stmt {
-            Statement::Return(..) => Ok(()),
+        match last_stmt.kind {
+            StatementKind::Return(..) => Ok(()),
             _ => Err(err),
         }
     }

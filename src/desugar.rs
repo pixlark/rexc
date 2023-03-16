@@ -8,15 +8,19 @@ impl File {
                 let elided = function.body.is_empty()
                     || !matches!(
                         function.body.last(),
-                        Some(Span {
-                            inner: Statement::Return(..),
+                        Some(Statement {
+                            kind: StatementKind::Return(..),
                             ..
                         })
                     );
                 if elided {
-                    function
-                        .body
-                        .push(Span::generated(Statement::Return((None, Expression::Unit))));
+                    function.body.push(Statement::new(
+                        StatementKind::Return((
+                            None,
+                            Expression::new(ExpressionKind::Unit, Span::Empty),
+                        )),
+                        Span::Empty,
+                    ));
                 }
             }
         }
