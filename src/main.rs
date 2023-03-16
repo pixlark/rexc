@@ -30,6 +30,7 @@ mod desugar;
 mod error;
 mod internal_error;
 mod ir;
+mod new_parser;
 mod parse;
 mod typecheck;
 mod validation;
