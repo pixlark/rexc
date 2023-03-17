@@ -10,7 +10,7 @@ use std::rc::Rc;
 use super::ast;
 use super::internal_error::*;
 use super::ir;
-use super::parse::{Span, SpanInfo};
+use super::new_parser::Span;
 
 #[derive(Debug)]
 pub enum TypeErrorKind {
@@ -28,16 +28,7 @@ pub enum TypeErrorKind {
 #[derive(Debug)]
 pub struct TypeError {
     pub kind: TypeErrorKind,
-}
-
-trait WithSpan<S, T, E> {
-    fn with_span(self, span: Span<S>) -> Result<T, Span<E>>;
-}
-
-impl<S, T> WithSpan<S, T, TypeError> for Result<T, TypeError> {
-    fn with_span(self, span: Span<S>) -> Result<T, Span<TypeError>> {
-        self.map_err(|err| Span::new(err, span.info))
-    }
+    pub span: Span,
 }
 
 impl std::fmt::Display for TypeError {
@@ -161,28 +152,29 @@ impl ir::Operation {
 
 impl ast::Expression {
     fn get_deref(&self) -> Result<Rc<RefCell<ast::Expression>>, TypeError> {
-        match self {
-            ast::Expression::Dereference(1, interior) => Ok(interior.clone()),
-            ast::Expression::Dereference(n, interior) => {
+        match &self.kind {
+            ast::ExpressionKind::Dereference(1, interior) => Ok(interior.clone()),
+            ast::ExpressionKind::Dereference(n, interior) => {
                 rexc_assert(*n > 1);
-                Ok(Rc::new(RefCell::new(ast::Expression::Dereference(
-                    *n - 1,
-                    interior.clone(),
+                Ok(Rc::new(RefCell::new(ast::Expression::new(
+                    ast::ExpressionKind::Dereference(*n - 1, interior.clone()),
+                    self.span.clone(),
                 ))))
             }
             _ => Err(TypeError {
                 kind: TypeErrorKind::DereferencedNonPointer,
+                span: self.span.clone(),
             }),
         }
     }
     fn typecheck(&mut self, type_map: &mut TypeMap) -> Result<ast::Type, TypeError> {
-        match self {
-            ast::Expression::Unit => Ok(ast::Type::Unit),
-            ast::Expression::Literal(lit) => match lit {
+        match &mut self.kind {
+            ast::ExpressionKind::Unit => Ok(ast::Type::Unit),
+            ast::ExpressionKind::Literal(lit) => match lit {
                 ast::Literal::Int(_) => Ok(ast::Type::Int),
                 ast::Literal::Bool(_) => Ok(ast::Type::Bool),
             },
-            ast::Expression::Operation(op, lhs, rhs) => {
+            ast::ExpressionKind::Operation(op, lhs, rhs) => {
                 let (lhs_unfilled_type, lhs) = lhs.as_mut();
                 let (rhs_unfilled_type, rhs) = rhs.as_mut();
 
@@ -192,6 +184,7 @@ impl ast::Expression {
                 if !op.accepts(&infer_left, &infer_right) {
                     return Err(TypeError {
                         kind: TypeErrorKind::IncompatibleOperands(*op),
+                        span: self.span.clone(),
                     });
                 }
 
@@ -201,25 +194,28 @@ impl ast::Expression {
                 let produced_type = op.produce(&infer_left, &infer_right);
                 Ok(produced_type)
             }
-            ast::Expression::Variable(name) => match type_map.get(name) {
+            ast::ExpressionKind::Variable(name) => match type_map.get(name) {
                 Some(type_) => Ok(type_),
                 None => Err(TypeError {
                     kind: TypeErrorKind::UnboundVariable(name.clone()),
+                    span: self.span.clone(),
                 }),
             },
-            ast::Expression::Dereference(..) => {
+            ast::ExpressionKind::Dereference(..) => {
                 let derefed_expression = self.get_deref()?;
                 let derefed_type = derefed_expression.borrow_mut().typecheck(type_map)?;
                 match derefed_type {
                     ast::Type::Pointer(ptr_interior_type) => Ok(*ptr_interior_type),
                     _ => Err(TypeError {
                         kind: TypeErrorKind::DereferencedNonPointer,
+                        span: self.span.clone(),
                     }),
                 }
             }
-            ast::Expression::FunctionCall(unfilled_type, name, arguments) => {
+            ast::ExpressionKind::FunctionCall(unfilled_type, name, arguments) => {
                 let type_ = type_map.get(name).ok_or(TypeError {
                     kind: TypeErrorKind::UnboundVariable(name.clone()),
+                    span: self.span.clone(),
                 })?;
                 match type_ {
                     ast::Type::Function(rc) => {
@@ -228,6 +224,7 @@ impl ast::Expression {
                         if arguments.len() != arg_types.len() {
                             return Err(TypeError {
                                 kind: TypeErrorKind::WrongArgumentCount(name.clone()),
+                                span: self.span.clone(),
                             });
                         }
                         for (i, ((unfilled_type, arg), expected_type)) in
@@ -237,6 +234,7 @@ impl ast::Expression {
                             if arg_type != *expected_type {
                                 return Err(TypeError {
                                     kind: TypeErrorKind::WrongArgumentType(name.clone(), i),
+                                    span: self.span.clone(),
                                 });
                             }
                             *unfilled_type = Some(arg_type.clone());
@@ -248,10 +246,11 @@ impl ast::Expression {
                     }
                     _ => Err(TypeError {
                         kind: TypeErrorKind::CalledNonFunction(name.clone()),
+                        span: self.span.clone(),
                     }),
                 }
             }
-            ast::Expression::Allocate(ite) => {
+            ast::ExpressionKind::Allocate(ite) => {
                 let (unfilled_type, expression) = ite.as_mut();
                 let inferred_type = expression.typecheck(type_map)?;
                 *unfilled_type = Some(inferred_type.clone());
@@ -262,10 +261,11 @@ impl ast::Expression {
 }
 
 impl ast::LValue {
-    fn get_deref(&self) -> Result<ast::LValue, TypeError> {
+    fn get_deref(&self, span: Span) -> Result<ast::LValue, TypeError> {
         if self.derefs == 0 {
             Err(TypeError {
                 kind: TypeErrorKind::DereferencedNonPointer,
+                span: span,
             })
         } else {
             Ok(ast::LValue {
@@ -274,17 +274,18 @@ impl ast::LValue {
             })
         }
     }
-    fn typecheck(&mut self, type_map: &TypeMap) -> Result<ast::Type, TypeError> {
+    fn typecheck(&mut self, type_map: &TypeMap, span: Span) -> Result<ast::Type, TypeError> {
         // TODO(Brooke): Evaluate this `.unwrap()`
         if self.derefs == 0 {
             Ok(type_map.get(&self.name).unwrap())
         } else {
-            let mut derefed_lvalue = self.get_deref()?;
-            let derefed_lvalue_type = derefed_lvalue.typecheck(type_map)?;
+            let mut derefed_lvalue = self.get_deref(span.clone())?;
+            let derefed_lvalue_type = derefed_lvalue.typecheck(type_map, span.clone())?;
             match derefed_lvalue_type {
                 ast::Type::Pointer(interior) => Ok(*interior),
                 _ => Err(TypeError {
                     kind: TypeErrorKind::DereferencedNonPointer,
+                    span: span,
                 }),
             }
         }
@@ -294,80 +295,71 @@ impl ast::LValue {
 impl ast::Statement {
     fn typecheck(
         &mut self,
-        span: Span<()>,
         type_map: &mut TypeMap,
         function_returns: ast::Type,
-    ) -> Result<(), Span<TypeError>> {
-        match self {
-            ast::Statement::BareExpression((unfilled_type, expression)) => {
-                *unfilled_type = Some(expression.typecheck(type_map).with_span(span.clone())?);
+    ) -> Result<(), TypeError> {
+        match &mut self.kind {
+            ast::StatementKind::BareExpression((unfilled_type, expression)) => {
+                *unfilled_type = Some(expression.typecheck(type_map)?);
             }
-            ast::Statement::MakeVariable(ast::MakeVariable { type_, lhs, rhs }) => {
-                let infer_type = rhs.typecheck(type_map).with_span(span.clone())?;
+            ast::StatementKind::MakeVariable(ast::MakeVariable { type_, lhs, rhs }) => {
+                let infer_type = rhs.typecheck(type_map)?;
                 if infer_type != *type_ {
-                    return Err(Span::new(
-                        TypeError {
-                            kind: TypeErrorKind::BadVariableDeclarationType(lhs.clone()),
-                        },
-                        span.info.clone(),
-                    ));
+                    return Err(TypeError {
+                        kind: TypeErrorKind::BadVariableDeclarationType(lhs.clone()),
+                        span: self.span.clone(),
+                    });
                 }
                 type_map.bind(lhs.clone(), type_.clone());
             }
-            ast::Statement::SetVariable(ast::SetVariable {
+            ast::StatementKind::SetVariable(ast::SetVariable {
                 lhs,
                 rhs: (unfilled_type, rhs),
             }) => {
-                let lhs_type = lhs.typecheck(type_map).with_span(span.clone())?;
-                let rhs_type = rhs.typecheck(type_map).with_span(span.clone())?;
+                let lhs_type = lhs.typecheck(type_map, self.span.clone())?;
+                let rhs_type = rhs.typecheck(type_map)?;
                 if lhs_type != rhs_type {
-                    return Err(Span::new(
-                        TypeError {
-                            kind: TypeErrorKind::AssignedWrongTypeToVariable(lhs.clone()),
-                        },
-                        span.info,
-                    ));
+                    return Err(TypeError {
+                        kind: TypeErrorKind::AssignedWrongTypeToVariable(lhs.clone()),
+                        span: self.span.clone(),
+                    });
                 }
                 *unfilled_type = Some(rhs_type);
             }
-            ast::Statement::Return((unfilled_type, expression)) => {
-                let infer_type = expression.typecheck(type_map).with_span(span.clone())?;
+            ast::StatementKind::Return((unfilled_type, expression)) => {
+                let infer_type = expression.typecheck(type_map)?;
                 if infer_type != function_returns {
-                    return Err(Span::new(
-                        TypeError {
-                            kind: TypeErrorKind::BadReturnType,
-                        },
-                        span.info,
-                    ));
+                    return Err(TypeError {
+                        kind: TypeErrorKind::BadReturnType,
+                        span: self.span.clone(),
+                    });
                 }
                 *unfilled_type = Some(infer_type);
             }
-            ast::Statement::If(ast::If {
+            ast::StatementKind::If(ast::If {
                 condition: (unfilled_type, expression),
                 body,
             }) => {
-                let infer_type = expression.typecheck(type_map).with_span(span.clone())?;
+                let infer_type = expression.typecheck(type_map)?;
                 // TODO: This should give an error if the condition expression isn't a bool
                 *unfilled_type = Some(infer_type);
 
                 type_map.push_scope();
                 for statement in body {
-                    let span = statement.nil();
-                    statement.typecheck(span, type_map, function_returns.clone())?;
+                    statement.typecheck(type_map, function_returns.clone())?;
                 }
                 type_map.pop_scope();
             }
-            ast::Statement::Loop(body) => {
+            ast::StatementKind::Loop(body) => {
                 type_map.push_scope();
                 for statement in body {
-                    let span = statement.nil();
-                    statement.typecheck(span, type_map, function_returns.clone())?;
+                    statement.typecheck(type_map, function_returns.clone())?;
                 }
                 type_map.pop_scope();
             }
-            ast::Statement::Break => {}
-            ast::Statement::Print((unfilled_type, expression)) => {
-                let infer_type = expression.typecheck(type_map).with_span(span.clone())?;
+            ast::StatementKind::Break => {}
+            ast::StatementKind::Print((unfilled_type, expression)) => {
+                let infer_type = expression.typecheck(type_map)?;
                 *unfilled_type = Some(infer_type);
             }
         }
@@ -376,7 +368,7 @@ impl ast::Statement {
 }
 
 impl ast::Function {
-    pub fn typecheck(&mut self, type_map: &mut TypeMap) -> Result<(), Span<TypeError>> {
+    pub fn typecheck(&mut self, type_map: &mut TypeMap) -> Result<(), TypeError> {
         // Function scope
         type_map.push_scope();
 
@@ -385,8 +377,7 @@ impl ast::Function {
         }
 
         for statement in self.body.iter_mut() {
-            let span = statement.nil();
-            statement.typecheck(span, type_map, self.returns.clone())?;
+            statement.typecheck(type_map, self.returns.clone())?;
         }
 
         Ok(())
@@ -394,7 +385,7 @@ impl ast::Function {
 }
 
 impl ast::File {
-    pub fn typecheck(&mut self) -> Result<(), Span<TypeError>> {
+    pub fn typecheck(&mut self) -> Result<(), TypeError> {
         let mut type_map = TypeMap::new();
         type_map.push_scope(); // File scope
 

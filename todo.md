@@ -2,3 +2,4 @@
    - Eventually this wrapper would take a Span reference to produce a better error message.
  - (**CFG construction**) Depending on how future features go in regards to the IR construction step, we may want to reconsider how it's built. Currently it walks the AST and produces IR directly, but this leads to issues w.r.t when some block N needs to jump to block M, but M hasn't been generated yet, so it's not known what index it's at. If instead we do a two-pass approach, first by generating a control-flow-graph that represents basic blocks and their connections, and then *label* that graph such that it corresponds to where each basic block should be in the IR chain, then traversing the graph and constructing IR is easy, requiring no oddities to handle the previously mentioned dependency issues.
  - Make build work for MSVC/Linux/etc (currently only on mingw64)
+ - Placing things after final return makes validator think there's no return statement at all.

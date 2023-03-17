@@ -1,4 +1,22 @@
-use super::parse::{Span, SpanInfo};
+use super::new_parser::Span;
+
+impl Span {
+    pub fn error_message(&self) {
+        let (source, filename) = match self {
+            Span::Empty => return,
+            Span::Eof { source, filename } => (source, filename),
+            Span::Char {
+                source, filename, ..
+            } => (source, filename),
+            Span::Range {
+                source, filename, ..
+            } => (source, filename),
+        };
+        let bytes = source.as_bytes();
+    }
+}
+
+/*use super::parse::{Span, SpanInfo};
 
 impl<T> Span<T> {
     pub fn exit_with_message(&self, source: &str, msg: &str) -> ! {
@@ -37,3 +55,4 @@ impl SpanInfo {
         std::process::exit(1);
     }
 }
+*/

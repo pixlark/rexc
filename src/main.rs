@@ -31,9 +31,10 @@ mod error;
 mod internal_error;
 mod ir;
 mod new_parser;
-mod parse;
 mod typecheck;
 mod validation;
+
+use std::rc::Rc;
 
 use bitflags::bitflags;
 
@@ -57,27 +58,17 @@ fn compile(path: std::path::PathBuf, gcc_path: Option<String>, flags: CompileFla
         panic!("Bad source file extension (expected .rx)")
     }
 
-    let source = std::fs::read_to_string(&path).unwrap();
+    let source = Rc::new(std::fs::read_to_string(&path).unwrap());
 
     // 1. Parse (Rexc source -> Sugared Untyped AST)
-    let filename = std::rc::Rc::new(String::from("<main>"));
-    let source_locate = parse::Location::new_extra(&source, filename.clone());
-    let mut ast = match parse::file(source_locate) {
-        Ok((_, ast)) => ast,
+    let filename = Rc::new(String::from("<main>"));
+    //let source_locate = parse::Location::new_extra(&source, filename.clone());
+    let lexer = new_parser::Lexer::new(source, filename).unwrap();
+    let mut parser = new_parser::Parser::new(lexer);
+    let mut ast = match parser.file() {
+        Ok(ast) => ast,
         Err(err) => {
-            let err_debug_str = match &err {
-                nom::Err::Incomplete(..) => String::from("Incomplete"),
-                nom::Err::Error(e) => format!("{:?}", e.code),
-                nom::Err::Failure(e) => format!("{:?}", e.code),
-            };
-
-            parse::SpanInfo::from_err(filename.clone(), err).exit_with_message(
-                &source,
-                &format!(
-                    "Parse error somewhere near here! (nom error: {:?})",
-                    &err_debug_str
-                ),
-            );
+            panic!("{:?}", err);
         }
     };
 
@@ -88,8 +79,8 @@ fn compile(path: std::path::PathBuf, gcc_path: Option<String>, flags: CompileFla
     match ast.typecheck() {
         Ok(()) => {}
         Err(err) => {
-            let msg = format!("{}", *err);
-            err.exit_with_message(&source, &msg);
+            let msg = format!("{}", err);
+            panic!("{}", msg);
         }
     }
 

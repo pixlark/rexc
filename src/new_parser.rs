@@ -2,18 +2,21 @@ use std::{cell::RefCell, collections::VecDeque, rc::Rc};
 
 use super::ast::*;
 use super::ir::Operation;
-use super::parse;
 
 #[derive(Debug, Clone)]
 pub enum Span {
+    Empty,
     Eof {
+        source: Rc<String>,
         filename: Rc<String>,
     },
     Char {
+        source: Rc<String>,
         filename: Rc<String>,
         pos: usize,
     },
     Range {
+        source: Rc<String>,
         filename: Rc<String>,
         start: usize,
         end: usize,
@@ -71,7 +74,7 @@ struct Token {
 }
 
 #[derive(Debug)]
-enum ParseErrorKind {
+pub enum ParseErrorKind {
     UnrecognizedCharacter(char),
     IntegerLiteralTooBig,
     ParserExpected {
@@ -81,13 +84,13 @@ enum ParseErrorKind {
 }
 
 #[derive(Debug)]
-struct ParseError {
-    kind: ParseErrorKind,
-    span: Span,
+pub struct ParseError {
+    pub kind: ParseErrorKind,
+    pub span: Span,
 }
 
 #[derive(Debug)]
-struct Lexer {
+pub struct Lexer {
     source: Rc<String>,
     chars: Vec<char>,
     cursor: usize,
@@ -98,8 +101,8 @@ struct Lexer {
 }
 
 #[derive(Debug)]
-struct Parser {
-    lexer: Lexer,
+pub struct Parser {
+    pub lexer: Lexer,
 }
 
 macro_rules! match_single_chars {
@@ -117,7 +120,7 @@ macro_rules! match_single_chars {
 }
 
 impl Lexer {
-    fn new(source: Rc<String>, filename: Rc<String>) -> Result<Lexer, ParseError> {
+    pub fn new(source: Rc<String>, filename: Rc<String>) -> Result<Lexer, ParseError> {
         let source = source.clone();
         let chars = source.chars().collect::<Vec<char>>();
 
@@ -136,7 +139,8 @@ impl Lexer {
         lexer.buffer.push_back(tok);
         Ok(lexer)
     }
-    fn consume(&mut self) -> Result<Option<Token>, ParseError> {
+    /// Does not do newline handling. Use `.consume()` instead.
+    fn base_consume(&mut self) -> Result<Option<Token>, ParseError> {
         let tok = self.buffer.pop_front().unwrap();
         if self.buffer.is_empty() {
             let next_tok = self.next_token()?;
@@ -144,10 +148,12 @@ impl Lexer {
         }
         Ok(tok)
     }
-    fn current(&mut self) -> &Option<Token> {
+    /// Does not do newline handling. Use `.current()` instead.
+    fn base_current(&mut self) -> &Option<Token> {
         self.buffer.front().unwrap()
     }
-    fn lookahead(&mut self, n: usize) -> Result<&Option<Token>, ParseError> {
+    /// Does not do newline handling. Use `.lookahead(n)` instead.
+    fn base_lookahead(&mut self, n: usize) -> Result<&Option<Token>, ParseError> {
         let mut current_lookahead = self.buffer.len();
 
         while n + 1 > current_lookahead {
@@ -157,6 +163,84 @@ impl Lexer {
         }
 
         Ok(self.buffer.iter().nth(n).unwrap())
+    }
+    fn consume(&mut self) -> Result<Option<Token>, ParseError> {
+        self.consume_newline()?;
+        self.base_consume()
+    }
+    fn current(&mut self) -> Result<&Option<Token>, ParseError> {
+        if self.is_newline() {
+            let mut n = 1usize;
+            loop {
+                if !matches!(
+                    self.base_lookahead(n)?,
+                    Some(Token {
+                        kind: TokenKind::Newline,
+                        ..
+                    })
+                ) {
+                    break;
+                }
+                n += 1;
+            }
+            self.base_lookahead(n)
+        } else {
+            Ok(self.buffer.front().unwrap())
+        }
+    }
+    fn real_lookahead_count(&self) -> (usize, usize) {
+        let mut count = 0usize;
+        let mut cursor = 0usize;
+        for tok in self.buffer.iter() {
+            cursor += 1;
+            if !matches!(
+                tok,
+                Some(Token {
+                    kind: TokenKind::Newline,
+                    ..
+                })
+            ) {
+                count += 1;
+            }
+        }
+        return (count, cursor - 1);
+    }
+    fn lookahead(&mut self, n: usize) -> Result<&Option<Token>, ParseError> {
+        let (mut real_lookahead_count, mut cursor) = self.real_lookahead_count();
+
+        while n + 1 > real_lookahead_count {
+            let next_tok = self.next_token()?;
+            cursor += 1;
+            if !matches!(
+                &next_tok,
+                Some(Token {
+                    kind: TokenKind::Newline,
+                    ..
+                })
+            ) {
+                real_lookahead_count += 1;
+            }
+            self.buffer.push_back(next_tok);
+        }
+
+        Ok(self.buffer.iter().nth(cursor).unwrap())
+    }
+    fn is_newline(&self) -> bool {
+        matches!(
+            self.buffer.front().unwrap(),
+            Some(Token {
+                kind: TokenKind::Newline,
+                ..
+            })
+        )
+    }
+    fn consume_newline(&mut self) -> Result<bool, ParseError> {
+        let mut any = false;
+        while self.is_newline() {
+            self.base_consume()?;
+            any = true;
+        }
+        Ok(any)
     }
     fn next_char(&mut self) -> Option<char> {
         self.advance_char();
@@ -179,20 +263,23 @@ impl Lexer {
     }
     fn span_range(&self, start: usize, end: usize) -> Span {
         Span::Range {
-            filename: self.source.clone(),
+            source: self.source.clone(),
+            filename: self.filename.clone(),
             start,
             end,
         }
     }
     fn span_char(&self, pos: usize) -> Span {
         Span::Char {
-            filename: self.source.clone(),
+            source: self.source.clone(),
+            filename: self.filename.clone(),
             pos,
         }
     }
     fn span_eof(&self) -> Span {
         Span::Eof {
-            filename: self.source.clone(),
+            source: self.source.clone(),
+            filename: self.filename.clone(),
         }
     }
     fn next_token(&mut self) -> Result<Option<Token>, ParseError> {
@@ -207,6 +294,17 @@ impl Lexer {
                 Some(c) => c,
                 None => return Ok(None),
             }
+        }
+
+        if c == '#' {
+            while c != '\n' {
+                self.advance_char();
+                c = match self.current_char() {
+                    Some(c) => c,
+                    None => return Ok(None),
+                }
+            }
+            return self.next_token();
         }
 
         // Integer
@@ -396,18 +494,23 @@ macro_rules! left_assoc_operator {
             let operator_list = $operator_list;
             let mut lhs = self.$subparser()?;
             loop {
-                if let Some(tok) = self.lexer.current() {
+                let current = self.lexer.current()?;
+                if let Some(tok) = current {
+                    let tok_span = tok.span.clone();
                     let op = operator_list.iter().find(|(k, _)| {
                         std::mem::discriminant(k) == std::mem::discriminant(&tok.kind)
                     });
                     if let Some(op) = op {
                         self.lexer.consume()?;
                         let rhs = self.$subparser()?;
-                        lhs = Expression::Operation(
-                            op.1,
-                            Box::new((None, lhs)),
-                            Box::new((None, rhs)),
-                        );
+                        lhs = Expression {
+                            kind: ExpressionKind::Operation(
+                                op.1,
+                                Box::new((None, lhs)),
+                                Box::new((None, rhs)),
+                            ),
+                            span: tok_span,
+                        };
                         continue;
                     }
                 }
@@ -422,7 +525,7 @@ macro_rules! separated {
     ($self:expr, $subparser:ident, by $separator:path, terminated_by $terminator:path) => {{
         let mut vec = Vec::new();
         loop {
-            let current = $self.lexer.current();
+            let current = $self.lexer.current()?;
             if let Some(Token {
                 kind: $terminator, ..
             }) = current
@@ -432,7 +535,7 @@ macro_rules! separated {
 
             vec.push($self.$subparser()?);
 
-            let current = $self.lexer.current();
+            let current = $self.lexer.current()?;
             if let Some(Token {
                 kind: $separator, ..
             }) = current
@@ -448,8 +551,11 @@ macro_rules! separated {
 
 macro_rules! expect {
     ($self:expr, expect $pat:pat, take $closure:expr, error $expect_list:expr) => {{
+        expect!($self, expect $pat, take $closure, error $expect_list, span)
+    }};
+    ($self:expr, expect $pat:pat, take $closure:expr, error $expect_list:expr, $span:ident) => {{
         let tok = $self.lexer.consume()?;
-        if let Some(Token { kind: $pat, .. }) = tok {
+        if let Some(Token { kind: $pat, $span }) = tok {
             $closure()
         } else {
             return $self.error_expected($expect_list, tok);
@@ -458,8 +564,16 @@ macro_rules! expect {
 }
 
 impl Parser {
-    fn new(lexer: Lexer) -> Parser {
+    pub fn new(lexer: Lexer) -> Parser {
         Parser { lexer }
+    }
+    fn expect_newline(&mut self) -> Result<(), ParseError> {
+        if self.lexer.consume_newline()? {
+            Ok(())
+        } else {
+            let tok = self.lexer.consume().unwrap();
+            self.error_expected(vec!["newline"], tok)
+        }
     }
     fn error_expected<T>(
         &self,
@@ -479,23 +593,32 @@ impl Parser {
         match tok {
             Some(Token {
                 kind: TokenKind::IntegerLiteral(i),
-                span: _span,
-            }) => Ok(Expression::Literal(Literal::Int(i))),
+                span,
+            }) => Ok(Expression::new(
+                ExpressionKind::Literal(Literal::Int(i)),
+                span,
+            )),
             Some(Token {
                 kind: TokenKind::True,
-                span: _span,
-            }) => Ok(Expression::Literal(Literal::Bool(true))),
+                span,
+            }) => Ok(Expression::new(
+                ExpressionKind::Literal(Literal::Bool(true)),
+                span,
+            )),
             Some(Token {
                 kind: TokenKind::False,
-                span: _span,
-            }) => Ok(Expression::Literal(Literal::Bool(false))),
+                span,
+            }) => Ok(Expression::new(
+                ExpressionKind::Literal(Literal::Bool(false)),
+                span,
+            )),
             Some(Token {
                 kind: TokenKind::Identifier(name),
-                span: _span,
-            }) => Ok(Expression::Variable(name)),
+                span,
+            }) => Ok(Expression::new(ExpressionKind::Variable(name), span)),
             Some(Token {
                 kind: TokenKind::OpenParen,
-                span: _span,
+                span,
             }) => {
                 let inner = self.expression()?;
                 let tok = self.lexer.consume()?;
@@ -515,7 +638,7 @@ impl Parser {
         }
     }
     fn function_call(&mut self) -> Result<Expression, ParseError> {
-        let current = self.lexer.current();
+        let current = self.lexer.current()?;
 
         match current {
             Some(Token {
@@ -531,11 +654,11 @@ impl Parser {
                     let ident_tok = self.lexer.consume().unwrap();
                     self.lexer.consume()?;
 
-                    let name = match ident_tok {
+                    let (name, span) = match ident_tok {
                         Some(Token {
                             kind: TokenKind::Identifier(name),
-                            ..
-                        }) => name,
+                            span,
+                        }) => (name, span),
                         _ => unreachable!(),
                     };
 
@@ -550,17 +673,21 @@ impl Parser {
                     ) {
                         return self.error_expected(vec!["')'"], end);
                     }
-                    return Ok(Expression::FunctionCall(
-                        None,
-                        name,
-                        interior.into_iter().map(|e| (None, e)).collect(),
+                    return Ok(Expression::new(
+                        ExpressionKind::FunctionCall(
+                            None,
+                            name,
+                            interior.into_iter().map(|e| (None, e)).collect(),
+                        ),
+                        span,
                     ));
                 }
             }
             Some(Token {
                 kind: TokenKind::Alloc,
-                ..
+                span,
             }) => {
+                let span = span.clone();
                 let peek = self.lexer.lookahead(1)?;
                 if let Some(Token {
                     kind: TokenKind::OpenParen,
@@ -581,7 +708,10 @@ impl Parser {
                     ) {
                         return self.error_expected(vec!["')'"], end);
                     }
-                    return Ok(Expression::Allocate(Box::new((None, interior))));
+                    return Ok(Expression::new(
+                        ExpressionKind::Allocate(Box::new((None, interior))),
+                        span,
+                    ));
                 }
             }
             _ => {}
@@ -591,7 +721,7 @@ impl Parser {
     fn dereference(&mut self) -> Result<Expression, ParseError> {
         let mut deref_count = 0;
         while matches!(
-            self.lexer.current(),
+            self.lexer.current()?,
             Some(Token {
                 kind: TokenKind::At,
                 ..
@@ -602,7 +732,11 @@ impl Parser {
         }
         let mut interior = self.function_call()?;
         if deref_count > 0 {
-            interior = Expression::Dereference(deref_count, Rc::new(RefCell::new(interior)));
+            let span = interior.span.clone();
+            interior = Expression::new(
+                ExpressionKind::Dereference(deref_count, Rc::new(RefCell::new(interior))),
+                span,
+            );
         }
         Ok(interior)
     }
@@ -661,12 +795,48 @@ impl Parser {
             Some(Token {
                 kind: TokenKind::Func,
                 ..
-            }) => unimplemented!(),
+            }) => {
+                expect!(
+                    self,
+                    expect TokenKind::OpenParen,
+                    take move || (),
+                    error vec!["'('"]
+                );
+                let params = separated!(
+                    self,
+                    type_annotation,
+                    by TokenKind::Comma,
+                    terminated_by TokenKind::CloseParen
+                );
+                expect!(
+                    self,
+                    expect TokenKind::CloseParen,
+                    take move || (),
+                    error vec!["')'"]
+                );
+
+                let tok = self.lexer.current()?;
+                let returns = if let Some(Token {
+                    kind: TokenKind::RightArrow,
+                    ..
+                }) = tok
+                {
+                    self.lexer.consume().unwrap();
+                    Some(self.type_annotation()?)
+                } else {
+                    None
+                };
+
+                Ok(Type::Function(Rc::new((
+                    returns.unwrap_or(Type::Unit),
+                    params,
+                ))))
+            }
             _ => self.error_expected(vec!["int", "bool", "func"], tok),
         }
     }
     fn make_variable(&mut self) -> Result<Statement, ParseError> {
-        self.lexer.consume().unwrap(); // `var`
+        let span = self.lexer.consume().unwrap().unwrap().span; // `var`
 
         let name = expect!(
             self,
@@ -693,29 +863,31 @@ impl Parser {
 
         let expr = self.expression()?;
 
-        Ok(Statement::MakeVariable(MakeVariable {
-            type_,
-            lhs: name,
-            rhs: expr,
-        }))
+        Ok(Statement::new(
+            StatementKind::MakeVariable(MakeVariable {
+                type_,
+                lhs: name,
+                rhs: expr,
+            }),
+            span,
+        ))
     }
     fn return_(&mut self) -> Result<Statement, ParseError> {
-        self.lexer.consume().unwrap();
+        let span = self.lexer.consume().unwrap().unwrap().span;
 
-        if let Some(Token {
-            kind: TokenKind::Newline,
-            ..
-        }) = self.lexer.current()
-        {
-            return Ok(Statement::Return((None, Expression::Unit)));
+        if self.lexer.is_newline() {
+            return Ok(Statement::new(
+                StatementKind::Return((None, Expression::new(ExpressionKind::Unit, span.clone()))),
+                span,
+            ));
         }
 
         let inner = self.expression()?;
 
-        Ok(Statement::Return((None, inner)))
+        Ok(Statement::new(StatementKind::Return((None, inner)), span))
     }
     fn print_(&mut self) -> Result<Statement, ParseError> {
-        self.lexer.consume().unwrap();
+        let span = self.lexer.consume().unwrap().unwrap().span;
 
         expect!(
             self,
@@ -731,41 +903,37 @@ impl Parser {
             Some(Token {
                 kind: TokenKind::CloseParen,
                 ..
-            }) => Ok(Statement::Print((None, inner))),
+            }) => Ok(Statement::new(StatementKind::Print((None, inner)), span)),
             _ => self.error_expected(vec!["')'"], end),
         }
     }
     fn if_(&mut self) -> Result<Statement, ParseError> {
-        self.lexer.consume().unwrap();
+        let span = self.lexer.consume().unwrap().unwrap().span;
 
         let condition = self.expression()?;
 
         let body = self.body()?;
 
-        Ok(Statement::If(If {
-            condition: (None, condition),
-            body: body
-                .into_iter()
-                .map(|s| parse::Span::new(s, None))
-                .collect(),
-        }))
+        Ok(Statement::new(
+            StatementKind::If(If {
+                condition: (None, condition),
+                body,
+            }),
+            span,
+        ))
     }
     fn loop_(&mut self) -> Result<Statement, ParseError> {
-        self.lexer.consume().unwrap();
+        let span = self.lexer.consume().unwrap().unwrap().span;
 
         let body = self.body()?;
 
-        Ok(Statement::Loop(
-            body.into_iter()
-                .map(|s| parse::Span::new(s, None))
-                .collect(),
-        ))
+        Ok(Statement::new(StatementKind::Loop(body), span))
     }
     fn lvalue(&mut self) -> Result<LValue, ParseError> {
         unimplemented!()
     }
     fn assignment(&mut self) -> Result<Statement, ParseError> {
-        let mut current = self.lexer.current();
+        let mut current = self.lexer.current()?;
         let mut deref_count = 0;
         while let Some(Token {
             kind: TokenKind::At,
@@ -774,7 +942,7 @@ impl Parser {
         {
             deref_count += 1;
             self.lexer.consume()?;
-            current = self.lexer.current();
+            current = self.lexer.current()?;
         }
 
         let name = expect!(
@@ -784,25 +952,29 @@ impl Parser {
             error vec!["ident"]
         );
 
-        expect!(
+        let span = expect!(
             self,
             expect TokenKind::AssignEquals,
-            take move || (),
-            error vec!["'='"]
+            take move || span,
+            error vec!["'='"],
+            span
         );
 
         let expr = self.expression()?;
 
-        Ok(Statement::SetVariable(SetVariable {
-            lhs: LValue {
-                name,
-                derefs: deref_count,
-            },
-            rhs: (None, expr),
-        }))
+        Ok(Statement::new(
+            StatementKind::SetVariable(SetVariable {
+                lhs: LValue {
+                    name,
+                    derefs: deref_count,
+                },
+                rhs: (None, expr),
+            }),
+            span,
+        ))
     }
     fn statement(&mut self) -> Result<Statement, ParseError> {
-        let current = self.lexer.current();
+        let current = self.lexer.current()?;
         //
         // Zero-lookahead statements
         //
@@ -825,10 +997,11 @@ impl Parser {
             }) => return self.loop_(),
             Some(Token {
                 kind: TokenKind::Break,
-                ..
+                span,
             }) => {
+                let span = span.clone();
                 self.lexer.consume().unwrap();
-                return Ok(Statement::Break);
+                return Ok(Statement::new(StatementKind::Break, span));
             }
             Some(Token {
                 kind: TokenKind::Print,
@@ -863,7 +1036,12 @@ impl Parser {
         //
         // Bare expression (assumed if none of the above)
         //
-        Ok(Statement::BareExpression((None, self.expression()?)))
+        let expr = self.expression()?;
+        let span = expr.span.clone();
+        Ok(Statement::new(
+            StatementKind::BareExpression((None, expr)),
+            span,
+        ))
     }
     fn body(&mut self) -> Result<Vec<Statement>, ParseError> {
         expect!(
@@ -876,7 +1054,7 @@ impl Parser {
         let mut body = Vec::new();
 
         loop {
-            let peek = self.lexer.current();
+            let peek = self.lexer.current()?;
             if matches!(
                 peek,
                 Some(Token {
@@ -888,12 +1066,7 @@ impl Parser {
                 break;
             }
             let stmt = self.statement()?;
-            expect!(
-                self,
-                expect TokenKind::Newline,
-                take move || (),
-                error vec!["newline"]
-            );
+            self.expect_newline()?;
             body.push(stmt);
         }
 
@@ -946,7 +1119,7 @@ impl Parser {
             error vec!["')'"]
         );
 
-        let current = self.lexer.current();
+        let current = self.lexer.current()?;
         let returns = if let Some(Token {
             kind: TokenKind::RightArrow,
             ..
@@ -964,29 +1137,21 @@ impl Parser {
             name,
             parameters,
             returns,
-            body: body
-                .into_iter()
-                .map(|stmt| parse::Span::new(stmt, None))
-                .collect(),
+            body,
         })
     }
-    fn file(&mut self) -> Result<File, ParseError> {
+    pub fn file(&mut self) -> Result<File, ParseError> {
         let mut functions = Vec::new();
 
         loop {
-            let current = self.lexer.current();
+            let current = self.lexer.current()?;
             match current {
                 Some(Token {
                     kind: TokenKind::Function,
                     ..
                 }) => {
                     let f = self.function()?;
-                    expect!(
-                        self,
-                        expect TokenKind::Newline,
-                        take move || (),
-                        error vec!["newline"]
-                    );
+                    self.expect_newline()?;
                     functions.push(f);
                 }
                 _ => break,
@@ -1007,8 +1172,12 @@ fn test_new_parser() {
     let lexer = Lexer::new(
         Rc::new(String::from(
             "\
-function baz() {
-    return false
+function foo() {
+    return
+}
+function bar(x: int) -> int {
+    x = x + 1
+    return x
 }
 ",
         )),
