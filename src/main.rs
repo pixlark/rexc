@@ -48,6 +48,11 @@ bitflags! {
     }
 }
 
+fn exit(msg: &str) -> ! {
+    eprintln!("Error!\n  {}", msg);
+    std::process::exit(1);
+}
+
 trait OrExit<T> {
     fn or_exit(self, msg: &str) -> T;
 }
@@ -56,10 +61,7 @@ impl<T> OrExit<T> for Option<T> {
     fn or_exit(self, msg: &str) -> T {
         match self {
             Some(t) => t,
-            None => {
-                eprintln!("Error!\n  {}", msg);
-                std::process::exit(1);
-            }
+            None => exit(msg),
         }
     }
 }
@@ -68,10 +70,7 @@ impl<T, E> OrExit<T> for Result<T, E> {
     fn or_exit(self, msg: &str) -> T {
         match self {
             Ok(t) => t,
-            Err(..) => {
-                eprintln!("Error!\n  {}", msg);
-                std::process::exit(1);
-            }
+            Err(..) => exit(msg),
         }
     }
 }
@@ -109,6 +108,10 @@ fn invoke_gcc(
         path.push("libgc.a");
         dunce::canonicalize(path).or_exit("UNC paths are not currently supported.")
     };
+
+    if !libgc.exists() {
+        exit("libgc.a not found! (Should be beside rexc executable).");
+    }
 
     command
         .env("PATH", path)
