@@ -3,7 +3,7 @@ use std::{cell::RefCell, collections::VecDeque, rc::Rc};
 use super::ast::*;
 use super::ir::Operation;
 
-#[derive(Debug, Clone)]
+#[derive(Clone)]
 pub enum Span {
     Empty,
     Eof {
@@ -23,6 +23,12 @@ pub enum Span {
     },
 }
 
+impl std::fmt::Debug for Span {
+    fn fmt(&self, fmt: &mut std::fmt::Formatter<'_>) -> Result<(), std::fmt::Error> {
+        write!(fmt, "<span>")
+    }
+}
+
 #[derive(Debug, Clone)]
 pub enum TokenKind {
     Newline,
@@ -35,17 +41,21 @@ pub enum TokenKind {
     At,
     Bool,
     Break,
+    Data,
     False,
     Func,
     Function,
     If,
     Int,
     Loop,
+    New,
+    Nil,
     Print,
     Return,
     True,
     Var,
     // Symbols
+    Dot,
     Comma,
     OpenParen,
     CloseParen,
@@ -87,16 +97,20 @@ impl std::fmt::Display for TokenKind {
             At, "at",
             Bool, "bool",
             Break, "break",
+            Data, "data",
             False, "false",
             Func, "func",
             Function, "function",
             If, "if",
             Int, "int",
             Loop, "loop",
+            New, "new",
+            Nil, "nil",
             Print, "print",
             Return, "return",
             True, "true",
             Var, "var",
+            Dot, ".",
             Comma, ",",
             OpenParen, "(",
             CloseParen, ")",
@@ -138,6 +152,7 @@ pub enum ParseErrorKind {
         expected: Vec<&'static str>,
         got: Option<TokenKind>,
     },
+    InvalidLValue,
 }
 
 impl std::fmt::Display for ParseErrorKind {
@@ -165,6 +180,9 @@ impl std::fmt::Display for ParseErrorKind {
                         .unwrap_or(String::from("End-of-file"))
                 )?;
                 Ok(())
+            }
+            ParseErrorKind::InvalidLValue => {
+                write!(fmt, "Unassignable expression (not an lvalue!)")
             }
         }
     }
@@ -456,12 +474,15 @@ impl Lexer {
                 "at" => Some(TokenKind::At),
                 "bool" => Some(TokenKind::Bool),
                 "break" => Some(TokenKind::Break),
+                "data" => Some(TokenKind::Data),
                 "false" => Some(TokenKind::False),
                 "func" => Some(TokenKind::Func),
                 "function" => Some(TokenKind::Function),
                 "if" => Some(TokenKind::If),
                 "int" => Some(TokenKind::Int),
                 "loop" => Some(TokenKind::Loop),
+                "new" => Some(TokenKind::New),
+                "nil" => Some(TokenKind::Nil),
                 "print" => Some(TokenKind::Print),
                 "return" => Some(TokenKind::Return),
                 "true" => Some(TokenKind::True),
@@ -485,6 +506,7 @@ impl Lexer {
         match_single_chars! {
             c, symbol_span,
             '\n', TokenKind::Newline,
+            '.', TokenKind::Dot,
             ',', TokenKind::Comma,
             '(', TokenKind::OpenParen,
             ')', TokenKind::CloseParen,
@@ -649,6 +671,29 @@ macro_rules! expect {
     }};
 }
 
+impl Expression {
+    fn to_lvalue(self) -> Result<LValue, ParseError> {
+        match self.kind {
+            ExpressionKind::Variable(s) => Ok(LValue::new(LValueKind::Identifier(s))),
+            ExpressionKind::Dereference(e) => Ok(LValue::new(LValueKind::Dereference(Box::new(
+                e.to_lvalue()?,
+            )))),
+            ExpressionKind::FieldAccess {
+                type_: _,
+                field,
+                lhs,
+            } => Ok(LValue::new(LValueKind::FieldAccess(
+                Box::new(lhs.1.to_lvalue()?),
+                field,
+            ))),
+            _ => Err(ParseError {
+                kind: ParseErrorKind::InvalidLValue,
+                span: self.span,
+            }),
+        }
+    }
+}
+
 impl Parser {
     pub fn new(lexer: Lexer) -> Parser {
         Parser { lexer }
@@ -677,6 +722,10 @@ impl Parser {
     fn atom(&mut self) -> Result<Expression, ParseError> {
         let tok = self.lexer.consume()?;
         match tok {
+            Some(Token {
+                kind: TokenKind::Nil,
+                span,
+            }) => Ok(Expression::new(ExpressionKind::Nil, span)),
             Some(Token {
                 kind: TokenKind::IntegerLiteral(i),
                 span,
@@ -804,27 +853,45 @@ impl Parser {
         }
         self.atom()
     }
-    fn dereference(&mut self) -> Result<Expression, ParseError> {
-        let mut deref_count = 0;
-        while matches!(
-            self.lexer.current()?,
-            Some(Token {
-                kind: TokenKind::At,
-                ..
-            })
-        ) {
-            deref_count += 1;
-            self.lexer.consume()?;
-        }
-        let mut interior = self.function_call()?;
-        if deref_count > 0 {
-            let span = interior.span.clone();
-            interior = Expression::new(
-                ExpressionKind::Dereference(deref_count, Rc::new(RefCell::new(interior))),
-                span,
+    fn field_access(&mut self) -> Result<Expression, ParseError> {
+        let mut lhs = self.function_call()?;
+        while let Some(Token {
+            kind: TokenKind::Dot,
+            ..
+        }) = self.lexer.current()?
+        {
+            self.lexer.consume().unwrap();
+            let (ident, span) = expect!(
+                self,
+                expect TokenKind::Identifier(id),
+                take move || (id, span),
+                error vec!["identifier"],
+                span
             );
+            lhs = Expression {
+                kind: ExpressionKind::FieldAccess {
+                    type_: None,
+                    lhs: Box::new((None, lhs)),
+                    field: ident,
+                },
+                span,
+            };
         }
-        Ok(interior)
+        Ok(lhs)
+    }
+    fn dereference(&mut self) -> Result<Expression, ParseError> {
+        if let Some(Token {
+            kind: TokenKind::At,
+            ..
+        }) = self.lexer.current()?
+        {
+            let span = self.lexer.consume().unwrap().unwrap().span;
+            return Ok(Expression {
+                kind: ExpressionKind::Dereference(Box::new(self.dereference()?)),
+                span,
+            });
+        }
+        self.field_access()
     }
     left_assoc_operator! {
         fn multiplicative_operators,
@@ -860,8 +927,59 @@ impl Parser {
             (TokenKind::NotEquals, Operation::NotEquals),
         ]
     }
+    fn new_field(&mut self) -> Result<(String, Expression), ParseError> {
+        let name = expect!(
+            self,
+            expect TokenKind::Identifier(id),
+            take move || id,
+            error vec!["identifier"]
+        );
+        expect!(
+            self,
+            expect TokenKind::AssignEquals,
+            take move || (),
+            error vec!["'='"]
+        );
+        let expression = self.expression()?;
+        Ok((name, expression))
+    }
+    fn new_(&mut self) -> Result<Expression, ParseError> {
+        if let Some(Token {
+            kind: TokenKind::New,
+            ..
+        }) = self.lexer.current()?
+        {
+            self.lexer.consume().unwrap();
+            let (name, span) = expect!(
+                self,
+                expect TokenKind::Identifier(id),
+                take move || (id, span),
+                error vec!["identifier"],
+                span
+            );
+            expect!(
+                self,
+                expect TokenKind::OpenBrace,
+                take move || (),
+                error vec!["'{'"]
+            );
+            let fields = separated!(self, new_field, by TokenKind::Comma, terminated_by TokenKind::CloseBrace);
+            expect!(
+                self,
+                expect TokenKind::CloseBrace,
+                take move || (),
+                error vec!["'}'"]
+            );
+            Ok(Expression {
+                kind: ExpressionKind::New((None, New { name, fields })),
+                span,
+            })
+        } else {
+            self.equality_operators()
+        }
+    }
     fn expression(&mut self) -> Result<Expression, ParseError> {
-        self.equality_operators()
+        self.new_()
     }
     fn type_annotation(&mut self) -> Result<Type, ParseError> {
         let tok = self.lexer.consume()?;
@@ -918,6 +1036,10 @@ impl Parser {
                     params,
                 ))))
             }
+            Some(Token {
+                kind: TokenKind::Identifier(name),
+                ..
+            }) => Ok(Type::Named((name, None))),
             _ => self.error_expected(vec!["int", "bool", "func"], tok),
         }
     }
@@ -928,7 +1050,7 @@ impl Parser {
             self,
             expect TokenKind::Identifier(name),
             take move || name,
-            error vec!["ident"]
+            error vec!["identifier"]
         );
 
         expect!(
@@ -1015,25 +1137,40 @@ impl Parser {
 
         Ok(Statement::new(StatementKind::Loop(body), span))
     }
+    /*
     fn assignment(&mut self) -> Result<Statement, ParseError> {
-        let mut current = self.lexer.current()?;
         let mut deref_count = 0;
         while let Some(Token {
             kind: TokenKind::At,
             ..
-        }) = current
+        }) = self.lexer.current()?
         {
             deref_count += 1;
-            self.lexer.consume()?;
-            current = self.lexer.current()?;
+            self.lexer.consume().unwrap();
         }
 
         let name = expect!(
             self,
             expect TokenKind::Identifier(name),
             take move || name,
-            error vec!["ident"]
+            error vec!["identifier"]
         );
+
+        let mut fields = Vec::new();
+        while let Some(Token {
+            kind: TokenKind::Dot,
+            ..
+        }) = self.lexer.current()?
+        {
+            self.lexer.consume().unwrap();
+            let field = expect!(
+                self,
+                expect TokenKind::Identifier(id),
+                take move || id,
+                error vec!["identifier"]
+            );
+            fields.push(field);
+        }
 
         let span = expect!(
             self,
@@ -1049,13 +1186,14 @@ impl Parser {
             StatementKind::SetVariable(SetVariable {
                 lhs: LValue {
                     name,
+                    fields,
                     derefs: deref_count,
                 },
                 rhs: (None, expr),
             }),
             span,
         ))
-    }
+    }*/
     fn statement(&mut self) -> Result<Statement, ParseError> {
         let current = self.lexer.current()?;
         //
@@ -1092,34 +1230,38 @@ impl Parser {
             }) => return self.print_(),
             _ => {}
         }
-        //
-        // Assignment (max lookahead 1)
-        //
-        match current {
-            Some(Token {
-                kind: TokenKind::At,
-                ..
-            }) => return self.assignment(),
-            Some(Token {
-                kind: TokenKind::Identifier(..),
-                ..
-            }) => {
-                let peek = self.lexer.lookahead(1)?;
 
-                if let Some(Token {
-                    kind: TokenKind::AssignEquals,
-                    ..
-                }) = peek
-                {
-                    return self.assignment();
-                }
-            }
-            _ => {}
+        //
+        // Assignment
+        //
+        let expr = self.expression()?;
+        if let Some(Token {
+            kind: TokenKind::AssignEquals,
+            ..
+        }) = self.lexer.current()?
+        {
+            // Coerce `Expression` into `LValue`
+            let lvalue = expr.to_lvalue()?;
+            let span = expect!(
+                self,
+                expect TokenKind::AssignEquals,
+                take move || span,
+                error vec!["'='"],
+                span
+            );
+            let expr = self.expression()?;
+            return Ok(Statement::new(
+                StatementKind::SetVariable(SetVariable {
+                    lhs: lvalue,
+                    rhs: (None, expr),
+                }),
+                span,
+            ));
         }
+
         //
         // Bare expression (assumed if none of the above)
         //
-        let expr = self.expression()?;
         let span = expr.span.clone();
         Ok(Statement::new(
             StatementKind::BareExpression((None, expr)),
@@ -1160,7 +1302,7 @@ impl Parser {
             self,
             expect TokenKind::Identifier(name),
             take move || name,
-            error vec!["ident"]
+            error vec!["identifier"]
         );
         expect!(
             self,
@@ -1178,7 +1320,7 @@ impl Parser {
             self,
             expect TokenKind::Identifier(name),
             take move || (name, span),
-            error vec!["ident"],
+            error vec!["identifier"],
             span
         );
 
@@ -1225,12 +1367,73 @@ impl Parser {
             span,
         })
     }
+    fn data_definition(&mut self) -> Result<DataType, ParseError> {
+        self.lexer.consume().unwrap();
+
+        let (name, span) = expect!(
+            self,
+            expect TokenKind::Identifier(id),
+            take move || (id, span),
+            error vec!["identifier"],
+            span
+        );
+
+        expect!(
+            self,
+            expect TokenKind::OpenBrace,
+            take move || (),
+            error vec!["'{'"]
+        );
+
+        let mut fields = Vec::new();
+
+        while !matches!(
+            self.lexer.current()?,
+            Some(Token {
+                kind: TokenKind::CloseBrace,
+                ..
+            })
+        ) {
+            let field_name = expect!(
+                self,
+                expect TokenKind::Identifier(id),
+                take move || id,
+                error vec!["identifier"]
+            );
+            expect!(
+                self,
+                expect TokenKind::Colon,
+                take move || (),
+                error vec!["':'"]
+            );
+            let field_type = self.type_annotation()?;
+            fields.push((field_type, field_name));
+        }
+
+        expect!(
+            self,
+            expect TokenKind::CloseBrace,
+            take move || (),
+            error vec!["'}'"]
+        );
+
+        Ok(DataType { name, fields, span })
+    }
     pub fn file(&mut self) -> Result<File, ParseError> {
+        let mut data_types = Vec::new();
         let mut functions = Vec::new();
 
         loop {
             let current = self.lexer.current()?;
             match current {
+                Some(Token {
+                    kind: TokenKind::Data,
+                    ..
+                }) => {
+                    let d = self.data_definition()?;
+                    self.expect_newline()?;
+                    data_types.push(Rc::new(RefCell::new(d)));
+                }
                 Some(Token {
                     kind: TokenKind::Function,
                     ..
@@ -1245,7 +1448,10 @@ impl Parser {
 
         let bad_token = self.lexer.consume()?;
         if bad_token.is_none() {
-            Ok(File { functions })
+            Ok(File {
+                data_types,
+                functions,
+            })
         } else {
             self.error_expected(vec!["'function'"], bad_token)
         }

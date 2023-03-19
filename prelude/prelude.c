@@ -10,6 +10,10 @@ void print_unit() {
     printf("unit\n");
 }
 
+void print_nil() {
+    printf("nil\n");
+}
+
 void print_int(int i) {
     printf("%d\n", i);
 }
@@ -19,5 +23,9 @@ void print_bool(int b) {
 }
 
 void print_pointer(void *p) {
-    printf("%p\n", p);
+    if (p == NULL) {
+        print_nil();
+    } else {
+        printf("%p\n", p);
+    }
 }

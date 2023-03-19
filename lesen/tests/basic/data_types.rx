@@ -1,0 +1,50 @@
+data D {
+    a: int
+    b: bool
+}
+
+function main() -> int {
+    # By value
+    var d1: D = new D { a = 1, b = true }
+    print(d1.a)
+    print(d1.b)
+
+    # By pointer
+    var d2: *D = alloc(new D { a = 2, b = false })
+    print((at d2).a)
+    print((at d2).b)
+
+    # Modify value
+    d1.a = 3
+    d1.b = false
+    print(d1.a)
+    print(d1.b)
+
+    # Modify pointer
+    (at d2).a = 4
+    (at d2).b = true
+    print((at d2).a)
+    print((at d2).b)
+
+    # Pass into function
+    var d3: *D = alloc(new D { a = 5, b = false })
+    foo(d3)
+
+    # Return from function
+    var d4: D = bar()
+    print(d4.a)
+    print(d4.b)
+
+    return 0
+}
+
+# Parameter position
+function foo(d: *D) {
+    print((at d).a)
+    print((at d).b)
+}
+
+# Return position
+function bar() -> D {
+    return new D { a = 7, b = true }
+}

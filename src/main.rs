@@ -170,6 +170,7 @@ fn compile(path: std::path::PathBuf, gcc_path: Option<String>, flags: CompileFla
             return;
         }
     };
+    //dbg!(&ast);
 
     // 2. Desugaring (Sugared Untyped AST -> Desugared Untyped AST)
     ast.desugar();

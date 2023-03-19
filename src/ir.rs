@@ -20,12 +20,23 @@ impl Variable {
     }
 }
 
+#[derive(Debug, Copy, Clone)]
+pub struct Field(pub usize);
+
+impl Field {
+    pub fn index(&self) -> usize {
+        self.0
+    }
+}
+
 #[derive(Clone)] // NOTE: Probably temporary while Type is limited to Int
 pub enum Type {
     Void,
     Int,
+    Null,
     Pointer(Box<Type>),
     Function(std::rc::Rc<(Type, Vec<Type>)>),
+    Named(String),
 }
 
 pub enum Literal {
@@ -54,9 +65,10 @@ pub enum FunctionReference {
 
 pub enum Rhs {
     Void,
+    Null,
     Parameter(String),
     Variable(Variable),
-    /// TOOD(Brooke):
+    /// TODO(Brooke):
     /// Should this be `Variable` instead of `Rhs`? Then `***p` would become
     /// ```
     ///  int*** _0 = ...;
@@ -66,21 +78,29 @@ pub enum Rhs {
     /// ```
     /// Besides this one variant we've stuck strongly to never nesting `Rhs`,
     /// so perhaps this should change...
-    Dereference(usize, Box<Rhs>),
+    Dereference(Box<Rhs>),
     FileScopeVariable(String),
     Literal(Literal),
     Operation(Operation, Variable, Variable),
     FunctionCall(FunctionReference, Vec<Variable>),
     SizeOf(Type),
+    FieldAccess(Variable, Field),
 }
 
+// TODO(Brooke): Flatten this because we want our IR
+//               to contain essentially no recursive data
+//               structures. It should be 'flat' - recursive
+//               things refer to previously emitted bindings
+//               instead of more IR data structure.
 #[derive(Clone)]
-pub struct LValue {
-    pub var: Variable,
-    pub derefs: usize,
+pub enum LValue {
+    Variable(Variable),
+    Dereference(Box<LValue>),
+    FieldAccess(Box<LValue>, Field),
 }
 
 pub enum Step {
+    NewUninitialized(TypedVariable),
     NewAssignment(TypedVariable, Rhs),
     /// Variable assignment makes this IR not actually SSA. However, the biggest reason
     /// we're targeting an SSA-like format is so that we can one day emit LLVM. Thankfully,
@@ -114,6 +134,12 @@ pub struct Function {
     pub body: Vec<Block>,
 }
 
+pub struct DataType {
+    pub name: String,
+    pub fields: Vec<Type>,
+}
+
 pub struct CompilationUnit {
+    pub data_types: Vec<DataType>,
     pub functions: Vec<Function>,
 }

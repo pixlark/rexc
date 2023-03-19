@@ -1,0 +1,31 @@
+data Link {
+    value: int
+    next: *Link
+}
+
+function main() -> int {
+    var list: *Link = alloc(new Link {
+        value = 1,
+        next = nil
+    })
+    (at list).next = alloc(new Link {
+        value = 2,
+        next = nil
+    })
+    (at (at list).next).next = alloc(new Link {
+        value = 3,
+        next = nil
+    })
+
+    printList(list)
+
+    return 0
+}
+
+function printList(list: *Link) {
+    if (list == nil) {
+        return
+    }
+    print((at list).value)
+    printList((at list).next)
+}

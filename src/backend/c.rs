@@ -25,6 +25,8 @@ trait CWriter {
     fn variable(&mut self, v: Variable) -> EmitResult;
     fn label(&mut self, b: BlockLocator) -> EmitResult;
     fn lvalue(&mut self, lhs: &LValue) -> EmitResult;
+    fn named_type(&mut self, s: &str) -> EmitResult;
+    fn struct_field(&mut self, f: Field) -> EmitResult;
 }
 
 impl<W: Write, E: EmitC<W>> CEmitter<W, E> for LineWriter<W> {
@@ -55,11 +57,28 @@ impl<W: Write> CWriter for LineWriter<W> {
     }
 
     fn lvalue(&mut self, lhs: &LValue) -> EmitResult {
-        for _ in 0..lhs.derefs {
-            self.string("*")?;
+        match lhs {
+            LValue::Variable(var) => self.variable(*var)?,
+            LValue::Dereference(interior) => {
+                self.string("(*")?;
+                self.lvalue(interior)?;
+                self.string(")")?;
+            }
+            LValue::FieldAccess(lhs, field) => {
+                self.lvalue(lhs)?;
+                self.string(".")?;
+                self.struct_field(*field)?;
+            }
         }
-        self.variable(lhs.var)?;
         Ok(())
+    }
+
+    fn named_type(&mut self, s: &str) -> EmitResult {
+        write!(self, "struct {}", s)
+    }
+
+    fn struct_field(&mut self, f: Field) -> EmitResult {
+        write!(self, "_{}", f.index())
     }
 }
 
@@ -133,6 +152,7 @@ impl<W: Write> EmitC<W> for Type {
             //               for function return values. At the moment we represent unit
             //               values as chars, which is wasteful.
             Type::Void => write!(writer, "char"),
+            Type::Null => write!(writer, "void*"),
             Type::Int => write!(writer, "int"),
             Type::Pointer(inner) => {
                 if inner.is_function_pointer() {
@@ -147,6 +167,7 @@ impl<W: Write> EmitC<W> for Type {
             Type::Function(f) => {
                 emit_function_pointer(writer, Type::Function(f.clone()), &|_| Ok(()))
             }
+            Type::Named(name) => writer.named_type(name),
         }?;
         Ok(())
     }
@@ -175,12 +196,11 @@ impl<W: Write> EmitC<W> for Rhs {
     fn emit_c(&self, writer: &mut LineWriter<W>) -> EmitResult {
         match self {
             Rhs::Void => writer.string("0"),
+            Rhs::Null => writer.string("NULL"),
             Rhs::Parameter(s) => writer.string(s),
             Rhs::Variable(var) => writer.variable(*var),
-            Rhs::Dereference(count, interior) => {
-                for _ in 0..*count {
-                    writer.string("*")?;
-                }
+            Rhs::Dereference(interior) => {
+                writer.string("*")?;
                 writer.emit(interior.as_ref())?;
                 Ok(())
             }
@@ -223,6 +243,12 @@ impl<W: Write> EmitC<W> for Rhs {
                 writer.string("(sizeof(")?;
                 writer.emit(type_)?;
                 writer.string("))")?;
+                Ok(())
+            }
+            Rhs::FieldAccess(var, field) => {
+                writer.variable(*var)?;
+                writer.string(".")?;
+                writer.struct_field(*field)?;
                 Ok(())
             }
         }?;
@@ -313,6 +339,20 @@ impl<W: Write> EmitC<W> for Block {
         // Block consists of assignments without control flow
         for assignment in self.assignments.iter() {
             match assignment {
+                Step::NewUninitialized((type_, var)) => {
+                    if type_.is_function_pointer() {
+                        // Special case for function pointers in C
+                        emit_function_pointer(writer, type_.clone(), &|w| {
+                            w.emit(&FunctionReference::Local(*var))
+                        })?;
+                    } else {
+                        writer.emit(type_)?;
+                        writer.space()?;
+                        writer.variable(*var)?;
+                    }
+                    writer.string(";")?;
+                    writer.newline()?;
+                }
                 Step::NewAssignment((type_, var), rhs) => {
                     if type_.is_function_pointer() {
                         // Special case for function pointers in C
@@ -364,11 +404,34 @@ impl<W: Write> EmitC<W> for Function {
     }
 }
 
+impl<W: Write> EmitC<W> for DataType {
+    fn emit_c(&self, writer: &mut LineWriter<W>) -> EmitResult {
+        writer.string("struct ")?;
+        writer.string(&self.name)?;
+        writer.string("{")?;
+        writer.newline()?;
+        for (i, field) in self.fields.iter().enumerate() {
+            writer.emit(field)?;
+            writer.space()?;
+            writer.struct_field(Field(i))?;
+            writer.string(";")?;
+            writer.newline()?;
+        }
+        writer.string("};")?;
+        writer.newline()?;
+        Ok(())
+    }
+}
+
 const C_PRELUDE: &str = include_str!("../../prelude/prelude.c");
 
 impl<W: Write> EmitC<W> for CompilationUnit {
     fn emit_c(&self, writer: &mut LineWriter<W>) -> EmitResult {
         write!(writer, "{}", C_PRELUDE)?;
+
+        for data_type in self.data_types.iter() {
+            data_type.emit_c(writer)?;
+        }
 
         for function in self.functions.iter() {
             function.emit_c_prototype(writer)?;

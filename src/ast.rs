@@ -4,26 +4,63 @@
 use std::cell::RefCell;
 use std::rc::Rc;
 
+use super::internal_error::*;
 use super::ir;
 use super::parse::Span;
 
 /// Type is special in our AST because many different
 /// instances of `Type` might point to the same "underlying"
-/// type (for instance a struct). So all non-trivial type
-/// information that represents a shared underlying type
+/// type (for instance a custom `data` type). So all non-trivial
+/// type information that represents a shared underlying type
 /// is held behind an `Rc`.
 /// Because of this, it's perfectly acceptable and expected
 /// to call `.clone()` on `Type`s all over the place, because
 /// all you're doing is bumping the reference count on possible
 /// non-trivial type information.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone)]
 pub enum Type {
     Unit,
+    Nil,
     Int,
     Bool,
     Pointer(Box<Type>),
     Function(Rc<(Type, Vec<Type>)>),
+    /// `Option<Rc<RefCell<DataType>>>` is a mouthful, so here's
+    /// an explanation:
+    ///   - Before typechecking, names have not been resolved
+    ///     into data types yet, so `Option` represents whether
+    ///     a type is "filled" or not
+    ///   - There will likely be multiple references to a data
+    ///     type, so `Rc` ensures we can share it to multiple
+    ///     places
+    ///   - If our data type is recursive, then the typechecker
+    ///     needs to somehow hold a reference to the data type
+    ///     in its type map, while simultaneously using a mutable
+    ///     reference to that data type to perform the typecheck.
+    ///     In that specific circumstance, shared mutability is
+    ///     required, so `RefCell` allows us to do that
+    Named((String, Option<Rc<RefCell<DataType>>>)),
 }
+
+impl std::cmp::PartialEq for Type {
+    fn eq(&self, other: &Self) -> bool {
+        match (self, other) {
+            (Self::Pointer(..), Self::Nil) => true,
+            (Self::Nil, Self::Pointer(..)) => true,
+            (Self::Pointer(lhs), Self::Pointer(rhs)) => lhs == rhs,
+            (Self::Function(lhs), Self::Function(rhs)) => Rc::ptr_eq(lhs, rhs),
+            (Self::Named((_lhs_name, lhs_type)), Self::Named((_rhs_name, rhs_type))) => {
+                match (lhs_type, rhs_type) {
+                    (Some(l), Some(r)) => Rc::ptr_eq(l, r),
+                    _ => rexc_panic("Tried to compare two ast::Type::Named instances that didn't have their data type references filled in!")
+                }
+            }
+            _ => core::mem::discriminant(self) == core::mem::discriminant(other),
+        }
+    }
+}
+
+impl std::cmp::Eq for Type {}
 
 pub type InferredType = Option<Type>;
 pub type InferredTypedExpression = (InferredType, Expression);
@@ -35,21 +72,20 @@ pub enum Literal {
 }
 
 #[derive(Debug)]
+pub struct New {
+    pub name: String,
+    pub fields: Vec<(String, Expression)>,
+}
+
+#[derive(Debug)]
 pub enum ExpressionKind {
     Unit,
+    // Temporary! Eventually there will be some Option/Maybe/etc generic type
+    // and the ability to create nil references will be removed.
+    Nil,
     Literal(Literal),
     Variable(String),
-    /// SAFETY:
-    ///   Because we've flattened `Dereference` to denote number of derefs with a `usize`
-    /// rather than recursively, we end up having to construct new `Dereference`s to recurse
-    /// on: `Dereference(n - 1, expr)`.
-    ///   This means copying around the `Expression` pointer, meaning it needs to be `Rc` and not
-    /// `Box`. Furthermore, because `.typecheck()` takes an `&mut` self reference, we need to have
-    /// a `RefCell` inside the `Rc` to grant us mutable access.
-    ///   We only do one compiler phase at a time, and these extra clones that get created are
-    /// mutably recursed on only once each. Thus we know our `RefCell` won't end up with more than
-    /// one mutable reference. So this use of `Rc<RefCell<Expression>>` is safe.
-    Dereference(usize, Rc<RefCell<Expression>>),
+    Dereference(Box<Expression>),
     Operation(
         ir::Operation,
         Box<InferredTypedExpression>,
@@ -57,6 +93,12 @@ pub enum ExpressionKind {
     ),
     FunctionCall(InferredType, String, Vec<InferredTypedExpression>),
     Allocate(Box<InferredTypedExpression>),
+    New((InferredType, New)),
+    FieldAccess {
+        type_: InferredType,
+        lhs: Box<InferredTypedExpression>,
+        field: String,
+    },
 }
 
 #[derive(Debug)]
@@ -79,9 +121,22 @@ pub struct MakeVariable {
 }
 
 #[derive(Debug, Clone)]
+pub enum LValueKind {
+    Identifier(String),
+    Dereference(Box<LValue>),
+    FieldAccess(Box<LValue>, String),
+}
+
+#[derive(Debug, Clone)]
 pub struct LValue {
-    pub name: String,
-    pub derefs: usize,
+    pub kind: LValueKind,
+    pub type_: Option<Type>,
+}
+
+impl LValue {
+    pub fn new(kind: LValueKind) -> LValue {
+        LValue { kind, type_: None }
+    }
 }
 
 #[derive(Debug)]
@@ -133,6 +188,14 @@ pub struct Function {
 }
 
 #[derive(Debug)]
+pub struct DataType {
+    pub name: String,
+    pub fields: Vec<(Type, String)>,
+    pub span: Span,
+}
+
+#[derive(Debug)]
 pub struct File {
+    pub data_types: Vec<Rc<RefCell<DataType>>>,
     pub functions: Vec<Function>,
 }

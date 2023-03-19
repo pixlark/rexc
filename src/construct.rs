@@ -5,19 +5,10 @@
 #![allow(clippy::wrong_self_convention)]
 
 use std::collections::HashMap;
-use std::rc::Rc;
 
 use super::ast::*;
 use super::internal_error::*;
 use super::ir;
-
-#[derive(Debug)]
-pub enum ConstructErrorKind {}
-
-#[derive(Debug)]
-pub struct ConstructError {
-    pub kind: ConstructErrorKind,
-}
 
 struct BlockConstructor {
     locator: ir::BlockLocator,
@@ -101,6 +92,22 @@ impl FunctionConstructor<'_> {
 
         var
     }
+    fn add_uninitialized_assignment(
+        &mut self,
+        block: ir::BlockLocator,
+        type_: ir::Type,
+    ) -> ir::Variable {
+        let var = ir::Variable(self.variable_counter);
+        self.variable_counter += 1;
+
+        let block = self.get_block(block);
+
+        block
+            .assignments
+            .push(ir::Step::NewUninitialized((type_, var)));
+
+        var
+    }
     fn add_reassignment(&mut self, block: ir::BlockLocator, lhs: ir::LValue, rhs: ir::Rhs) {
         let block = self.get_block(block);
         block.assignments.push(ir::Step::Assignment(lhs, rhs));
@@ -158,12 +165,31 @@ impl FunctionConstructor<'_> {
         let rhs = ir::Rhs::FunctionCall(ir::FunctionReference::FileScope(name), arguments);
         block.assignments.push(ir::Step::Discarded(rhs));
     }
+    fn variable_lookup(&self, name: String) -> ir::Rhs {
+        if self.file_scope_variables.contains(&name) {
+            ir::Rhs::FileScopeVariable(name)
+        } else {
+            let mut params_with_name = self.parameters.iter().filter(|(_, s)| s == &name);
+            let param = params_with_name.next();
+            rexc_assert(params_with_name.next().is_none());
+            if let Some((_, param)) = param {
+                ir::Rhs::Parameter(String::from(param))
+            } else {
+                let var = self
+                    .variable_map
+                    .get(&name)
+                    .rexc_unwrap("Somehow a variable was never added to the variable map!");
+                ir::Rhs::Variable(*var)
+            }
+        }
+    }
 }
 
 impl Type {
     fn into_ir(&self) -> ir::Type {
         match self {
             Type::Unit => ir::Type::Void,
+            Type::Nil => ir::Type::Null,
             Type::Int => ir::Type::Int,
             Type::Bool => ir::Type::Int,
             Type::Pointer(type_) => ir::Type::Pointer(Box::new(type_.into_ir())),
@@ -171,7 +197,15 @@ impl Type {
                 rc.0.into_ir(),
                 rc.1.iter().map(|t| t.into_ir()).collect(),
             ))),
+            Type::Named((name, _)) => ir::Type::Named(name.clone()),
         }
+    }
+}
+
+impl DataType {
+    fn get_field(&self, name: &str) -> ir::Field {
+        let (field_index, _) = self.fields.iter().enumerate().find(|(_, (_, s))| s == name).rexc_unwrap("Somehow a new expression passed the typechecker with a field assignment that's not in the associated data type!");
+        ir::Field(field_index)
     }
 }
 
@@ -179,31 +213,14 @@ impl Expression {
     fn into_ir(self, ctor: &mut FunctionConstructor, block: ir::BlockLocator) -> ir::Rhs {
         match self.kind {
             ExpressionKind::Unit => ir::Rhs::Void,
+            ExpressionKind::Nil => ir::Rhs::Null,
             ExpressionKind::Literal(literal) => match literal {
                 Literal::Int(i) => ir::Rhs::Literal(ir::Literal::Int(i)),
                 Literal::Bool(b) => ir::Rhs::Literal(ir::Literal::Int(if b { 1 } else { 0 })),
             },
-            ExpressionKind::Variable(name) => {
-                if ctor.file_scope_variables.contains(&name) {
-                    ir::Rhs::FileScopeVariable(name)
-                } else {
-                    let mut params_with_name = ctor.parameters.iter().filter(|(_, s)| s == &name);
-                    let param = params_with_name.next();
-                    rexc_assert(params_with_name.next().is_none());
-                    if let Some((_, param)) = param {
-                        ir::Rhs::Parameter(String::from(param))
-                    } else {
-                        let var = ctor
-                            .variable_map
-                            .get(&name)
-                            .rexc_unwrap("Somehow a variable was never added to the variable map!");
-                        ir::Rhs::Variable(*var)
-                    }
-                }
-            }
-            ExpressionKind::Dereference(count, interior) => {
-                let moved = Rc::try_unwrap(interior).rexc_unwrap("Somehow an dereference expression reached construction while still having other references alive to its interior!");
-                ir::Rhs::Dereference(count, Box::new(moved.into_inner().into_ir(ctor, block)))
+            ExpressionKind::Variable(name) => ctor.variable_lookup(name),
+            ExpressionKind::Dereference(inner) => {
+                ir::Rhs::Dereference(Box::new(inner.into_ir(ctor, block)))
             }
             ExpressionKind::Operation(operation, left, right) => {
                 let (left_type, left) = *left;
@@ -272,15 +289,55 @@ impl Expression {
                 // Assign the value to the allocated pointer
                 ctor.add_reassignment(
                     block,
-                    ir::LValue {
-                        var: allocation,
-                        derefs: 1,
-                    },
+                    ir::LValue::Dereference(Box::new(ir::LValue::Variable(allocation))),
                     ir::Rhs::Variable(value),
                 );
 
                 // Return the pointer variable
                 ir::Rhs::Variable(allocation)
+            }
+            ExpressionKind::New((type_, New { name, fields })) => {
+                let var = ctor.add_uninitialized_assignment(block, ir::Type::Named(name));
+
+                let data_type = match &type_ {
+                    Some(Type::Named((_, Some(type_), ..))) => {
+                        type_.clone()
+                    }
+                    _ => rexc_panic("Somehow a new expression was annotated with a non-datatype type, or was not annotated at all!")
+                };
+
+                for (field_name, expression) in fields {
+                    let rhs = expression.into_ir(ctor, block);
+                    let lhs = data_type.borrow().get_field(&field_name);
+                    ctor.add_reassignment(
+                        block,
+                        ir::LValue::FieldAccess(Box::new(ir::LValue::Variable(var)), lhs),
+                        rhs,
+                    );
+                }
+
+                ir::Rhs::Variable(var)
+            }
+            ExpressionKind::FieldAccess {
+                type_: _type,
+                lhs: interior,
+                field,
+            } => {
+                let lhs_type = interior.0.rexc_unwrap("Somehow a field access expression passed the typechecker without having its interior type filled in!");
+                let interior = interior.1;
+
+                let field = match &lhs_type {
+                    Type::Named((_, Some(data_type))) => {
+                        data_type.borrow().get_field(&field)
+                    },
+                    _ => rexc_panic("Somehow a field access expression *not* on a data structure passed the typechecker!"),
+                };
+
+                let ir_type = lhs_type.into_ir();
+                let rhs = interior.into_ir(ctor, block);
+                let var = ctor.add_assignment(block, ir_type, rhs);
+
+                ir::Rhs::FieldAccess(var, field)
             }
         }
     }
@@ -288,10 +345,28 @@ impl Expression {
 
 impl LValue {
     fn into_ir(&mut self, ctor: &mut FunctionConstructor) -> ir::LValue {
-        let var = *ctor.variable_map.get(&self.name).unwrap();
-        ir::LValue {
-            var,
-            derefs: self.derefs,
+        match &mut self.kind {
+            LValueKind::Identifier(name) => {
+                let var = ctor.variable_lookup(name.clone());
+                let var = match var {
+                    ir::Rhs::Variable(var) => var,
+                    ir::Rhs::Parameter(..) | ir::Rhs::FileScopeVariable(..) => rexc_panic("Somehow an lvalue that resolves to a non-local variable passed the typechecker."),
+                    _ => unreachable!(),
+                };
+                ir::LValue::Variable(var)
+            }
+            LValueKind::Dereference(inner) => {
+                ir::LValue::Dereference(Box::new(inner.into_ir(ctor)))
+            }
+            LValueKind::FieldAccess(lhs, field) => {
+                let field = match &lhs.type_ {
+                    Some(Type::Named((_, Some(data_type)))) => {
+                        data_type.borrow().get_field(field)
+                    },
+                    _ => rexc_panic("Somehow a field access expression *not* on a data structure passed the typechecker!"),
+                };
+                ir::LValue::FieldAccess(Box::new(lhs.into_ir(ctor)), field)
+            }
         }
     }
 }
@@ -463,10 +538,12 @@ fn body_into_ir(
                 let type_ = type_.rexc_unwrap("Somehow a print statement passed the typechecker without its type being filled in!");
                 let prelude_function_name = String::from(match type_ {
                     Type::Unit => "print_unit",
+                    Type::Nil => "print_nil",
                     Type::Int => "print_int",
                     Type::Bool => "print_bool",
                     Type::Pointer(..) => "print_pointer",
                     Type::Function(..) => unimplemented!(),
+                    Type::Named(..) => unimplemented!(),
                 });
 
                 let rhs = expression.into_ir(ctor, current_block);
@@ -502,6 +579,19 @@ impl Function {
     }
 }
 
+impl DataType {
+    pub fn into_ir(&self) -> ir::DataType {
+        ir::DataType {
+            name: self.name.clone(),
+            fields: self
+                .fields
+                .iter()
+                .map(|(t, _)| t.clone().into_ir())
+                .collect(),
+        }
+    }
+}
+
 impl File {
     pub fn into_ir(self) -> ir::CompilationUnit {
         let file_scope_variables = self
@@ -510,8 +600,14 @@ impl File {
             .map(|f| f.name.clone())
             .collect::<Vec<String>>();
         let mut compilation_unit = ir::CompilationUnit {
+            data_types: Vec::new(),
             functions: Vec::new(),
         };
+        for data_type in self.data_types {
+            compilation_unit
+                .data_types
+                .push(data_type.borrow().into_ir());
+        }
         for function in self.functions {
             compilation_unit
                 .functions
