@@ -1,3 +1,5 @@
+#![allow(dead_code)]
+
 pub trait InternalCompilerErrorable<T> {
     fn rexc_unwrap(self, msg: &str) -> T;
 }

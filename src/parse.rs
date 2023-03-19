@@ -632,7 +632,12 @@ macro_rules! separated {
 
 macro_rules! expect {
     ($self:expr, expect $pat:pat, take $closure:expr, error $expect_list:expr) => {{
-        expect!($self, expect $pat, take $closure, error $expect_list, span)
+        let tok = $self.lexer.consume()?;
+        if let Some(Token { kind: $pat, .. }) = tok {
+            $closure()
+        } else {
+            return $self.error_expected($expect_list, tok);
+        }
     }};
     ($self:expr, expect $pat:pat, take $closure:expr, error $expect_list:expr, $span:ident) => {{
         let tok = $self.lexer.consume()?;

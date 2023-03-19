@@ -39,11 +39,96 @@ use std::rc::Rc;
 use bitflags::bitflags;
 
 use backend::c::EmitC;
+use internal_error::*;
 
 bitflags! {
     struct CompileFlags: u32 {
         const SHOW_EMITTED = 0b00000001;
         const EMIT_ONLY    = 0b00000010;
+    }
+}
+
+trait OrExit<T> {
+    fn or_exit(self, msg: &str) -> T;
+}
+
+impl<T> OrExit<T> for Option<T> {
+    fn or_exit(self, msg: &str) -> T {
+        match self {
+            Some(t) => t,
+            None => {
+                eprintln!("Error!\n  {}", msg);
+                std::process::exit(1);
+            }
+        }
+    }
+}
+
+impl<T, E> OrExit<T> for Result<T, E> {
+    fn or_exit(self, msg: &str) -> T {
+        match self {
+            Ok(t) => t,
+            Err(..) => {
+                eprintln!("Error!\n  {}", msg);
+                std::process::exit(1);
+            }
+        }
+    }
+}
+
+fn invoke_gcc(
+    file_path: std::path::PathBuf,
+    emit_path: std::path::PathBuf,
+    gcc_path: Option<String>,
+    _flags: CompileFlags,
+) {
+    // TODO(Brooke): This is all very specific to windows msys2...
+    // TODO(Brooke): So much .unwrap here omg please make this good and not a hack!
+
+    // Assume `invoke_gcc` only called when EMIT_ONLY is not enabled.
+    let gcc_path = gcc_path.unwrap();
+
+    let executable_path = file_path.with_extension("exe");
+
+    let mut command = std::process::Command::new(&gcc_path);
+
+    let gcc_dir = std::path::Path::new(&gcc_path)
+        .ancestors()
+        .nth(1)
+        .or_exit("Malformed GCC path.");
+
+    let mut path = std::env::var("PATH").or_exit("No PATH variable defined in environment.");
+
+    // TODO(Brooke): Technically we should be supporting non-utf8 paths.
+    path.extend(format!(";{}", gcc_dir.to_str().or_exit("Malformed GCC path.")).chars());
+
+    //TODO(Brooke): Technically we should also be supporting UNC paths.
+    let libgc = {
+        let mut path = std::env::current_exe().or_exit("Unable to get path to rexc executable.");
+        path.pop();
+        path.push("libgc.a");
+        dunce::canonicalize(path).or_exit("UNC paths are not currently supported.")
+    };
+
+    command
+        .env("PATH", path)
+        .arg(emit_path.to_str().or_exit("Malformed source path."))
+        .arg(libgc)
+        .arg("-o")
+        .arg(
+            executable_path
+                .to_str()
+                .or_exit("Path to rexc executable is malformed."),
+        )
+        .arg("-I")
+        .arg(".");
+
+    println!("Invoking gcc...\n    {:?}", command);
+
+    let output = command.output().or_exit("Failed to run GCC.");
+    if output.status.code() != Some(0) {
+        eprintln!("{}", String::from_utf8_lossy(&output.stderr));
+        panic!("Aborted compilation!")
     }
 }
 
@@ -58,7 +143,7 @@ fn compile(path: std::path::PathBuf, gcc_path: Option<String>, flags: CompileFla
         panic!("Bad source file extension (expected .rx)")
     }
 
-    let source = Rc::new(std::fs::read_to_string(&path).unwrap());
+    let source = Rc::new(std::fs::read_to_string(&path).or_exit("Unable to read source file."));
 
     // 1. Parse (Rexc source -> Sugared Untyped AST)
     let filename = Rc::new(String::from("<main>"));
@@ -114,10 +199,14 @@ fn compile(path: std::path::PathBuf, gcc_path: Option<String>, flags: CompileFla
     // 6. Emit (IR -> C source)
     let mut writer = std::io::LineWriter::new(Vec::new());
 
-    ir_.emit_c(&mut writer).unwrap();
+    ir_.emit_c(&mut writer)
+        .rexc_unwrap("There was an error with the C backend!");
 
-    let buffer = writer.into_inner().unwrap();
-    let emitted_c = String::from_utf8(buffer).unwrap();
+    let buffer = writer
+        .into_inner()
+        .rexc_unwrap("There was an error with the C backend!");
+    let emitted_c =
+        String::from_utf8(buffer).rexc_unwrap("Somehow the C backend emitted invalid UTF-8!");
 
     // TODO(Brooke): Only emit to string if we're printing the emitted code, otherwise
     //               emit directly to the `emit_path` file.
@@ -126,50 +215,14 @@ fn compile(path: std::path::PathBuf, gcc_path: Option<String>, flags: CompileFla
     }
 
     let emit_path = path.with_extension("rx.c");
-    std::fs::write(&emit_path, emitted_c).unwrap();
+    std::fs::write(&emit_path, &emitted_c).or_exit("Couldn't emit C to intermediate file.");
 
     if flags.contains(CompileFlags::EMIT_ONLY) {
         return;
     }
 
     // 7. Invoke GCC (C source -> Executable)
-    // TODO(Brooke): This is all very specific to windows msys2...
-    // TODO(Brooke): So much .unwrap here omg please make this good and not a hack!
-    let gcc_path = gcc_path.unwrap();
-
-    let executable_path = path.with_extension("exe");
-
-    let mut command = std::process::Command::new(&gcc_path);
-
-    let gcc_dir = std::path::Path::new(&gcc_path).ancestors().nth(1).unwrap();
-
-    let mut path = std::env::var("PATH").unwrap();
-    path.extend(format!(";{}", gcc_dir.to_str().unwrap()).chars());
-
-    let libgc = {
-        let mut path = std::env::current_exe().unwrap();
-        path.pop();
-        path.push("libgc.a");
-        let path = dunce::canonicalize(path).unwrap();
-        path
-    };
-
-    command
-        .env("PATH", path)
-        .arg(emit_path.to_str().unwrap())
-        .arg(libgc)
-        .arg("-o")
-        .arg(executable_path.to_str().unwrap())
-        .arg("-I")
-        .arg(".");
-
-    println!("Invoking gcc...\n    {:?}", command);
-
-    let output = command.output().unwrap();
-    if output.status.code() != Some(0) {
-        eprintln!("{}", String::from_utf8_lossy(&output.stderr));
-        panic!("Aborted compilation!")
-    }
+    invoke_gcc(path, emit_path, gcc_path, flags);
 }
 
 fn main() {
@@ -180,7 +233,7 @@ fn main() {
         .subcommand(
             clap::Command::new("compile")
                 .about("Invoke the compiler directly on a source file")
-                .arg(clap::arg!(--source <PATH> "The source file to be compiled"))
+                .arg(clap::arg!(--source <PATH> "The source file to be compiled").required(true))
                 .arg(clap::arg!(--gcc <PATH> "Path to GCC"))
                 .arg(clap::arg!(--"show-emitted" "Print emitted C code to stdout"))
                 .arg(clap::arg!(--"emit-only" "Only emit C code, don't call GCC")),
@@ -216,7 +269,7 @@ fn main() {
 
             compile(
                 std::path::PathBuf::from(source.unwrap()),
-                gcc_path.map(|s| s.clone()),
+                gcc_path.cloned(),
                 flags,
             );
         }

@@ -2,6 +2,8 @@
 //! an intermediate representation that can be emitted
 //! by any of the backends.
 
+#![allow(clippy::wrong_self_convention)]
+
 use std::collections::HashMap;
 use std::rc::Rc;
 
@@ -183,7 +185,7 @@ impl Expression {
             },
             ExpressionKind::Variable(name) => {
                 if ctor.file_scope_variables.contains(&name) {
-                    ir::Rhs::FileScopeVariable(name.clone())
+                    ir::Rhs::FileScopeVariable(name)
                 } else {
                     let mut params_with_name = ctor.parameters.iter().filter(|(_, s)| s == &name);
                     let param = params_with_name.next();
@@ -265,7 +267,7 @@ impl Expression {
 
                 // Create the initial value
                 let rhs = expr.into_ir(ctor, block);
-                let value = ctor.add_assignment(block, type_ir.clone(), rhs);
+                let value = ctor.add_assignment(block, type_ir, rhs);
 
                 // Assign the value to the allocated pointer
                 ctor.add_reassignment(
