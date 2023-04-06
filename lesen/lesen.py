@@ -246,7 +246,7 @@ def generate_expect_file_from_source(args, manifest):
             "test-kind": args["kind"]
         }
         generated_expect_fullname = f"{source_bare}.expect"
-        with open(generated_expect_fullname, "w") as f:
+        with open(generated_expect_fullname, "w", newline="\n") as f:
             json.dump(header, f, indent = 4)
             f.write('\n---\n')
             # Python adds \r to every \n automatically, so if we have \r's
