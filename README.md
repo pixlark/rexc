@@ -6,6 +6,44 @@ It's been a while since I've worked on one, however (college ramped up, and then
 
 So `rexc` is an attempt to divulge those ideas in the form of one frankenstinean programming language, in which I plan to cram every cool little trinket and doodad that I've thought up in the past couple years.
 
+### Some example code
+
+This code builds up a linked list data structure, then traverses it to output a sum:
+
+```
+data Link {
+    value: int
+    next: *Link
+}
+
+function main() -> int {
+    var list: *Link = alloc(new Link {
+        value = 1,
+        next = nil
+    })
+    list.next = alloc(new Link {
+        value = 2,
+        next = nil
+    })
+    list.next.next = alloc(new Link {
+        value = 3,
+        next = nil
+    })
+
+    # Outputs 6 (1 + 2 + 3)
+    print(sumOverList(list))
+
+    return 0
+}
+
+function sumOverList(list: *Link) -> int {
+    if (list == nil) {
+        return 0
+    }
+    return list.value + sumOverList(list.next)
+}
+```
+
 ### What features are planned?
 
 I have a cornucopia of nebulous ideas floating around my head, but here are a couple concrete ones that I know I want to implement:
