@@ -106,7 +106,7 @@ impl std::fmt::Display for TypeError {
                 write!(f, "Shadowed {}. For ease of implementation, shadowing variables is currently illegal. This is subject to change.", name)
             }
             TypeErrorKind::MutatedNonLocalVariable(name) => {
-                write!(f, "Tried to mutate {}, which is not a local variable! Parameters and file-scope variables are immutable.", name)
+                write!(f, "Tried to mutate {}, which is not a local variable! File-scope variables are immutable.", name)
             }
             TypeErrorKind::RecursiveDataType => {
                 write!(f, "Type is recursive and has infinite size! (Try using a pointer for recursive references.)")
@@ -492,10 +492,10 @@ impl ast::Expression {
                 *lhs_unfilled_type = Some(lhs_type);
 
                 let data_type = data_type.rexc_unwrap("Somehow a field access expression got past the typechecker without having its data_type reference filled in!");
-                let type_ = data_type.borrow().check_field_access(&field)?;
+                let type_ = data_type.borrow().check_field_access(field)?;
 
                 *unfilled_type = Some(type_.clone());
-                Ok(type_.clone())
+                Ok(type_)
             }
         }
     }
@@ -507,6 +507,10 @@ impl ast::LValue {
             ast::LValueKind::Identifier(name) => match name_map.get(name) {
                 Some(Binding {
                     kind: BindingKind::Local,
+                    type_,
+                }) => type_,
+                Some(Binding {
+                    kind: BindingKind::Parameter,
                     type_,
                 }) => type_,
                 Some(Binding { .. }) => {
@@ -678,12 +682,9 @@ impl ast::File {
             type_map.bind(data_type.borrow().name.clone());
             let typed_status = data_type.borrow_mut().typecheck(&type_map)?;
             type_map.fill_binding(&data_type.borrow().name, data_type.clone());
-            match typed_status {
-                TypedStatus::Incomplete => {
-                    // Recursive data types require a second pass of typechecking
-                    data_type.borrow_mut().typecheck(&type_map)?.unwrap();
-                }
-                _ => {}
+            if let TypedStatus::Incomplete = typed_status {
+                // Recursive data types require a second pass of typechecking
+                data_type.borrow_mut().typecheck(&type_map)?.unwrap();
             }
         }
 

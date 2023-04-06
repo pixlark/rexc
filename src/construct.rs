@@ -350,12 +350,12 @@ impl LValue {
         match &mut self.kind {
             LValueKind::Identifier(name) => {
                 let var = ctor.variable_lookup(name.clone());
-                let var = match var {
-                    ir::Rhs::Variable(var) => var,
-                    ir::Rhs::Parameter(..) | ir::Rhs::FileScopeVariable(..) => rexc_panic("Somehow an lvalue that resolves to a non-local variable passed the typechecker."),
+                match var {
+                    ir::Rhs::Variable(var) => ir::LValue::Variable(var),
+                    ir::Rhs::Parameter(param) => ir::LValue::Parameter(param),
+                    ir::Rhs::FileScopeVariable(..) => rexc_panic("Somehow an lvalue that resolves to a non-local variable passed the typechecker."),
                     _ => unreachable!(),
-                };
-                ir::LValue::Variable(var)
+                }
             }
             LValueKind::Dereference(inner) => {
                 ir::LValue::Dereference(Box::new(inner.into_ir(ctor)))

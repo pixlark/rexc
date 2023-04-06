@@ -95,6 +95,7 @@ pub enum Rhs {
 #[derive(Clone)]
 pub enum LValue {
     Variable(Variable),
+    Parameter(String),
     Dereference(Box<LValue>),
     FieldAccess(Box<LValue>, Field),
 }

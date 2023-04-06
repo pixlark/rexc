@@ -59,6 +59,7 @@ impl<W: Write> CWriter for LineWriter<W> {
     fn lvalue(&mut self, lhs: &LValue) -> EmitResult {
         match lhs {
             LValue::Variable(var) => self.variable(*var)?,
+            LValue::Parameter(param) => self.string(param)?,
             LValue::Dereference(interior) => {
                 self.string("(*")?;
                 self.lvalue(interior)?;

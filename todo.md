@@ -6,9 +6,5 @@
  - Make all user-defined identifiers have some prefix in the emitted source (`DataType -> _dDataType`, `funcFoo -> _ffuncFoo`, `parameter` -> `_pparameter`, and so on...)
  - validate that structs don't have multiple fields with the same name
  - make internal errors nicer in construct.rs (add internal error enum or something with Display impl)
- - Allow reaching through pointer arguments to mutate (currently even *inside* pointers are immutable!)
  - Mutually recursive / out-of-order defined types
     - Will require more elegant way to check for recursive data types
- - Create `Visitor` trait for ast, like https://doc.rust-lang.org/stable/nightly-rustc/src/rustc_ast/visit.rs.html#111-248
-    - This will greatly simplify things like the desugar step.
- - Add desugar for accessing fields through a pointer
