@@ -17,18 +17,10 @@ data Link {
 }
 
 function main() -> int {
-    var list: *Link = alloc(new Link {
-        value = 1,
-        next = nil
-    })
-    list.next = alloc(new Link {
-        value = 2,
-        next = nil
-    })
-    list.next.next = alloc(new Link {
-        value = 3,
-        next = nil
-    })
+    var list: *Link = nil
+    list = appendList(list, 1)
+    list = appendList(list, 2)
+    list = appendList(list, 3)
 
     # Outputs 6 (1 + 2 + 3)
     print(sumOverList(list))
@@ -37,10 +29,25 @@ function main() -> int {
 }
 
 function sumOverList(list: *Link) -> int {
-    if (list == nil) {
+    if list == nil {
         return 0
     }
     return list.value + sumOverList(list.next)
+}
+
+function appendList(list: *Link, to_append: int) -> *Link {
+    if list == nil {
+        return alloc(new Link { value = to_append, next = nil })
+    }
+    var iter: *Link = list
+    loop {
+        if iter.next == nil {
+            break
+        }
+        iter = iter.next
+    }
+    iter.next = alloc(new Link { value = to_append, next = nil })
+    return list
 }
 ```
 
