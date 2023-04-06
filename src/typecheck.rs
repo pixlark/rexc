@@ -463,13 +463,23 @@ impl ast::Expression {
                 type_: unfilled_type,
                 lhs,
                 field,
+                needs_dereference,
             } => {
                 let lhs_unfilled_type = &mut lhs.0;
                 let lhs = &mut lhs.1;
 
                 let lhs_type = lhs.typecheck(type_map, name_map)?;
+                let mut lhs_check_type = &lhs_type;
 
-                let data_type = match &lhs_type {
+                // Check if we need to do an automatic dereference to access
+                // the field behind a pointer.
+                *needs_dereference = Some(false);
+                if let ast::Type::Pointer(inner) = &lhs_type {
+                    lhs_check_type = inner;
+                    *needs_dereference = Some(true);
+                }
+
+                let data_type = match lhs_check_type {
                     ast::Type::Named((_, data_type)) => data_type.clone(),
                     _ => {
                         return Err(TypeError {
@@ -519,9 +529,22 @@ impl ast::LValue {
                     }
                 }
             }
-            ast::LValueKind::FieldAccess(lhs, field) => {
+            ast::LValueKind::FieldAccess {
+                lhs,
+                field,
+                needs_dereference,
+            } => {
                 let lhs_type = lhs.typecheck(name_map, span.clone())?;
-                let data_type = match &lhs_type {
+                let mut lhs_check_type = &lhs_type;
+
+                // Check if we need to automatically dereference to access the field
+                *needs_dereference = Some(false);
+                if let ast::Type::Pointer(inner) = &lhs_type {
+                    lhs_check_type = inner;
+                    *needs_dereference = Some(true);
+                }
+
+                let data_type = match lhs_check_type {
                     ast::Type::Named((_, data_type)) => data_type.clone(),
                     _ => {
                         return Err(TypeError {

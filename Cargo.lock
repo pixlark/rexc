@@ -119,6 +119,12 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "9b7820b9daea5457c9f21c69448905d723fbd21136ccf521748f23fd49e723ee"
 
 [[package]]
+name = "replace_with"
+version = "0.1.7"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "e3a8614ee435691de62bcffcf4a66d91b3594bf1428a5722e79103249a095690"
+
+[[package]]
 name = "rexc"
 version = "0.1.0"
 dependencies = [
@@ -126,6 +132,7 @@ dependencies = [
  "clap",
  "cmake",
  "dunce",
+ "replace_with",
 ]
 
 [[package]]

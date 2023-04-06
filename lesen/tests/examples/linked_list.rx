@@ -8,11 +8,11 @@ function main() -> int {
         value = 1,
         next = nil
     })
-    (at list).next = alloc(new Link {
+    list.next = alloc(new Link {
         value = 2,
         next = nil
     })
-    (at (at list).next).next = alloc(new Link {
+    list.next.next = alloc(new Link {
         value = 3,
         next = nil
     })
@@ -26,6 +26,6 @@ function printList(list: *Link) {
     if (list == nil) {
         return
     }
-    print((at list).value)
-    printList((at list).next)
+    print(list.value)
+    printList(list.next)
 }

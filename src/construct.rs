@@ -229,26 +229,26 @@ impl Expression {
                 let left_rhs = left.into_ir(ctor, block);
                 let left = ctor.add_assignment(
                     block,
-                    left_type.rexc_unwrap("Somehow the left side of an operation passed the typechecker without having a type filled in!").into_ir(),
-                    left_rhs
+                    left_type.expected_from_typechecker().into_ir(),
+                    left_rhs,
                 );
                 // Create SSA assignment chain for right expression
                 let right_rhs = right.into_ir(ctor, block);
                 let right = ctor.add_assignment(
                     block,
-                    right_type.rexc_unwrap("Somehow the right side of an operation passed the typechecker without having a type filled in!").into_ir(),
-                    right_rhs
+                    right_type.expected_from_typechecker().into_ir(),
+                    right_rhs,
                 );
                 // Return new RHS which uses those chains
                 ir::Rhs::Operation(operation, left, right)
             }
             ExpressionKind::FunctionCall(type_, name, arguments) => {
-                let _type = type_.rexc_unwrap("Somehow a function call passed the typechecker without having a type filled in!");
+                let _type = type_.expected_from_typechecker();
 
                 // Create SSA assignment chain for each argument
                 let mut arg_vars = Vec::new();
                 for (arg_type, argument) in arguments {
-                    let arg_type = arg_type.rexc_unwrap("Somehow a function call's argument passed the typechecker without having a type filled in!");
+                    let arg_type = arg_type.expected_from_typechecker();
                     let arg_type = arg_type.into_ir();
                     let rhs = argument.into_ir(ctor, block);
                     arg_vars.push(ctor.add_assignment(block, arg_type, rhs));
@@ -267,7 +267,7 @@ impl Expression {
             }
             ExpressionKind::Allocate(ite) => {
                 let (type_, expr) = *ite;
-                let type_ = type_.rexc_unwrap("Somehow an alloc expression got past the typechecker without having its type filled in!");
+                let type_ = type_.expected_from_typechecker();
                 let type_ir = type_.into_ir();
 
                 // Allocate the space
@@ -322,8 +322,10 @@ impl Expression {
                 type_: _type,
                 lhs: interior,
                 field,
+                needs_dereference: _,
             } => {
-                let lhs_type = interior.0.rexc_unwrap("Somehow a field access expression passed the typechecker without having its interior type filled in!");
+                //let lhs_type = interior.0.rexc_unwrap("Somehow a field access expression passed the typechecker without having its interior type filled in!");
+                let lhs_type = interior.0.expected_from_typechecker();
                 let interior = interior.1;
 
                 let field = match &lhs_type {
@@ -358,12 +360,16 @@ impl LValue {
             LValueKind::Dereference(inner) => {
                 ir::LValue::Dereference(Box::new(inner.into_ir(ctor)))
             }
-            LValueKind::FieldAccess(lhs, field) => {
+            LValueKind::FieldAccess {
+                lhs,
+                field,
+                needs_dereference: _,
+            } => {
                 let field = match &lhs.type_ {
                     Some(Type::Named((_, Some(data_type)))) => {
                         data_type.borrow().get_field(field)
                     },
-                    _ => rexc_panic("Somehow a field access expression *not* on a data structure passed the typechecker!"),
+                    _ => rexc_panic("Somehow a field access lvalue *not* on a data structure passed the typechecker!"),
                 };
                 ir::LValue::FieldAccess(Box::new(lhs.into_ir(ctor)), field)
             }
@@ -388,8 +394,7 @@ fn body_into_ir(
     for statement in body {
         match statement.kind {
             StatementKind::BareExpression((type_, expression)) => {
-                let _type = type_.rexc_unwrap("Somehow a bare expression passed the typechecker without its type being filled in!")
-                    .into_ir();
+                let _type = type_.expected_from_typechecker().into_ir();
                 let rhs = expression.into_ir(ctor, current_block);
 
                 ctor.add_discarded_value(current_block, rhs);
@@ -411,7 +416,7 @@ fn body_into_ir(
                 ctor.add_reassignment(current_block, ir_lhs, ir_rhs);
             }
             StatementKind::Return((type_, expression)) => {
-                let type_ = type_.rexc_unwrap("Somehow a return statement passed the typechecker without its type being filled in!");
+                let type_ = type_.expected_from_typechecker();
                 let rhs = expression.into_ir(ctor, current_block);
                 let type_ir = type_.into_ir();
                 let index = ctor.add_assignment(current_block, type_ir.clone(), rhs);
@@ -424,7 +429,7 @@ fn body_into_ir(
                 condition: (type_, condition),
                 body: if_body,
             }) => {
-                let type_ = type_.rexc_unwrap("Somehow an if condition passed the typechecker without its type being filled in!");
+                let type_ = type_.expected_from_typechecker();
                 let rhs = condition.into_ir(ctor, current_block);
                 let type_ir = type_.into_ir();
                 let index = ctor.add_assignment(current_block, type_ir.clone(), rhs);
@@ -535,7 +540,7 @@ fn body_into_ir(
                 break;
             }
             StatementKind::Print((type_, expression)) => {
-                let type_ = type_.rexc_unwrap("Somehow a print statement passed the typechecker without its type being filled in!");
+                let type_ = type_.expected_from_typechecker();
                 let prelude_function_name = String::from(match type_ {
                     Type::Unit => "print_unit",
                     Type::Nil => "print_nil",

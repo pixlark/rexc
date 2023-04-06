@@ -9,6 +9,7 @@ edition = "2021"
 clap = "4"
 bitflags = "1"
 dunce = "1"
+replace_with = "0.1.7"
 
 [build-dependencies]
 cmake = "0.1"

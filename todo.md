@@ -12,4 +12,3 @@
  - Create `Visitor` trait for ast, like https://doc.rust-lang.org/stable/nightly-rustc/src/rustc_ast/visit.rs.html#111-248
     - This will greatly simplify things like the desugar step.
  - Add desugar for accessing fields through a pointer
- - 

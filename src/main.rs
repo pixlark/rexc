@@ -5,20 +5,25 @@
 //! The compiler follows a linear pipeline from source to emitted C:
 //!   1. Parsing
 //!     - Converts source file to abstract syntax tree.
-//!   2. Desugaring (Not yet implemented)
+//!   2. Pre-Typecheck Desugaring
 //!     - Transforms complex elements of the abstract syntax tree into simple
-//!       combinations of more fundamental elements.
+//!       combinations of more fundamental elements. Doesn't require any complex
+//!       type information.
 //!   3. Typechecking
 //!     - Validates the type system, ensuring that there are no type-level
 //!       errors in the source.
-//!   4. Validation
+//!   4. Post-Typecheck Desugaring
+//!     - Transforms complex elements of the abstract syntax tree into simple
+//!       combinations of more fundamental elements. Requires some type information
+//!       that has been filled in by the typechecker.
+//!   5. Validation
 //!     - Performs analysis on the typed, desugared AST to catch errors before
 //!       construction starts (at which point any issues become Internal Compiler
 //!       Errors which ideally should not be user-facing)
-//!   5. Construction
+//!   6. Construction
 //!     - Transforms the abstract syntax tree into intermediate representation,
 //!       which is linearized into groups of basic blocks connected by gotos.
-//!   6. Emitting
+//!   7. Emitting
 //!     - The C backend (or in the future possible another backend) takes the
 //!       intermediate representation and uses it to write out a .c file, which
 //!       can then be compiled into our final executable.
@@ -33,6 +38,7 @@ mod ir;
 mod parse;
 mod typecheck;
 mod validation;
+mod visitor;
 
 use std::rc::Rc;
 
@@ -172,10 +178,10 @@ fn compile(path: std::path::PathBuf, gcc_path: Option<String>, flags: CompileFla
     };
     //dbg!(&ast);
 
-    // 2. Desugaring (Sugared Untyped AST -> Desugared Untyped AST)
-    ast.desugar();
+    // 2. Pre-Typecheck Desugaring (Sugared Untyped AST -> Partially Desugared Untyped AST)
+    ast.desugar_pre_typecheck();
 
-    // 3. Typecheck (Desugared Untyped AST -> Desugared Typed AST)
+    // 3. Typecheck (Partially Desguared Untyped AST -> Partial Desugared Typed AST)
     match ast.typecheck() {
         Ok(()) => {}
         Err(err) => {
@@ -186,7 +192,10 @@ fn compile(path: std::path::PathBuf, gcc_path: Option<String>, flags: CompileFla
         }
     }
 
-    // 4. Validation (Desugared Typed AST -> Desugared Typed AST)
+    // 4. Post-Typecheck Desugaring (Partially Desugared Typed AST -> Desugared Typed AST)
+    ast.desugar_post_typecheck();
+
+    // 5. Validation (Desugared Typed AST -> Desugared Typed AST)
     match ast.validate() {
         Ok(()) => {}
         Err(err) => {
@@ -197,10 +206,10 @@ fn compile(path: std::path::PathBuf, gcc_path: Option<String>, flags: CompileFla
         }
     }
 
-    // 5. Construct (Desugared Typed AST -> IR)
+    // 6. Construct (Desugared Typed AST -> IR)
     let ir_ = ast.into_ir();
 
-    // 6. Emit (IR -> C source)
+    // 7. Emit (IR -> C source)
     let mut writer = std::io::LineWriter::new(Vec::new());
 
     ir_.emit_c(&mut writer)
@@ -225,7 +234,7 @@ fn compile(path: std::path::PathBuf, gcc_path: Option<String>, flags: CompileFla
         return;
     }
 
-    // 7. Invoke GCC (C source -> Executable)
+    // 8. Invoke GCC (C source -> Executable)
     invoke_gcc(path, emit_path, gcc_path, flags);
 }
 

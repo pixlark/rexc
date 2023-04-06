@@ -98,6 +98,7 @@ pub enum ExpressionKind {
         type_: InferredType,
         lhs: Box<InferredTypedExpression>,
         field: String,
+        needs_dereference: Option<bool>,
     },
 }
 
@@ -124,7 +125,11 @@ pub struct MakeVariable {
 pub enum LValueKind {
     Identifier(String),
     Dereference(Box<LValue>),
-    FieldAccess(Box<LValue>, String),
+    FieldAccess {
+        lhs: Box<LValue>,
+        field: String,
+        needs_dereference: Option<bool>,
+    },
 }
 
 #[derive(Debug, Clone)]
@@ -187,11 +192,18 @@ pub struct Function {
     pub span: Span,
 }
 
-#[derive(Debug)]
 pub struct DataType {
     pub name: String,
     pub fields: Vec<(Type, String)>,
     pub span: Span,
+}
+
+impl std::fmt::Debug for DataType {
+    //! Recursive DataTypes will print infinitely if we let the default recursive
+    //! debug implementation be derived.
+    fn fmt(&self, fmt: &mut std::fmt::Formatter<'_>) -> Result<(), std::fmt::Error> {
+        write!(fmt, "DataType({:?})", self.name)
+    }
 }
 
 #[derive(Debug)]

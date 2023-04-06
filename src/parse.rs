@@ -682,10 +682,12 @@ impl Expression {
                 type_: _,
                 field,
                 lhs,
-            } => Ok(LValue::new(LValueKind::FieldAccess(
-                Box::new(lhs.1.to_lvalue()?),
+                needs_dereference: None,
+            } => Ok(LValue::new(LValueKind::FieldAccess {
+                lhs: Box::new(lhs.1.to_lvalue()?),
                 field,
-            ))),
+                needs_dereference: None,
+            })),
             _ => Err(ParseError {
                 kind: ParseErrorKind::InvalidLValue,
                 span: self.span,
@@ -873,6 +875,7 @@ impl Parser {
                     type_: None,
                     lhs: Box::new((None, lhs)),
                     field: ident,
+                    needs_dereference: None,
                 },
                 span,
             };
