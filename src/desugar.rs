@@ -42,8 +42,8 @@ impl File {
 
 struct AutomaticDereferenceFieldAccess;
 
-impl Visitor for AutomaticDereferenceFieldAccess {
-    fn visit_expression(&mut self, expression: &mut Expression) {
+impl Visitor<()> for AutomaticDereferenceFieldAccess {
+    fn visit_expression(&mut self, expression: &mut Expression) -> Result<(), ()> {
         if let ExpressionKind::FieldAccess {
             type_: _,
             lhs,
@@ -74,9 +74,9 @@ impl Visitor for AutomaticDereferenceFieldAccess {
                 );
             }
         }
-        walk_expression(self, expression);
+        walk_expression(self, expression)
     }
-    fn visit_lvalue(&mut self, lvalue: &mut LValue) {
+    fn visit_lvalue(&mut self, lvalue: &mut LValue) -> Result<(), ()> {
         if let LValueKind::FieldAccess {
             lhs,
             field: _,
@@ -101,7 +101,7 @@ impl Visitor for AutomaticDereferenceFieldAccess {
                 );
             }
         }
-        walk_lvalue(self, lvalue);
+        walk_lvalue(self, lvalue)
     }
 }
 
@@ -114,7 +114,7 @@ impl File {
         self.elided_void_returns();
     }
     pub fn desugar_post_typecheck(&mut self) {
-        AutomaticDereferenceFieldAccess.visit_file(self);
+        let _ = AutomaticDereferenceFieldAccess.visit_file(self);
     }
 }
 

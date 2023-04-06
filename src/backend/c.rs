@@ -22,6 +22,7 @@ trait CWriter {
     fn space(&mut self) -> EmitResult;
     fn newline(&mut self) -> EmitResult;
     fn string(&mut self, s: &str) -> EmitResult;
+    fn user_defined_identifier(&mut self, s: &str) -> EmitResult;
     fn variable(&mut self, v: Variable) -> EmitResult;
     fn label(&mut self, b: BlockLocator) -> EmitResult;
     fn lvalue(&mut self, lhs: &LValue) -> EmitResult;
@@ -48,6 +49,10 @@ impl<W: Write> CWriter for LineWriter<W> {
         write!(self, "{}", s)
     }
 
+    fn user_defined_identifier(&mut self, s: &str) -> EmitResult {
+        write!(self, "u_{}", s)
+    }
+
     fn variable(&mut self, v: Variable) -> EmitResult {
         write!(self, "_{}", v.index())
     }
@@ -59,7 +64,7 @@ impl<W: Write> CWriter for LineWriter<W> {
     fn lvalue(&mut self, lhs: &LValue) -> EmitResult {
         match lhs {
             LValue::Variable(var) => self.variable(*var)?,
-            LValue::Parameter(param) => self.string(param)?,
+            LValue::Parameter(param) => self.user_defined_identifier(param)?,
             LValue::Dereference(interior) => {
                 self.string("(*")?;
                 self.lvalue(interior)?;
@@ -75,7 +80,9 @@ impl<W: Write> CWriter for LineWriter<W> {
     }
 
     fn named_type(&mut self, s: &str) -> EmitResult {
-        write!(self, "struct {}", s)
+        write!(self, "struct ")?;
+        self.user_defined_identifier(s)?;
+        Ok(())
     }
 
     fn struct_field(&mut self, f: Field) -> EmitResult {
@@ -187,8 +194,9 @@ impl<W: Write> EmitC<W> for FunctionReference {
     fn emit_c(&self, writer: &mut LineWriter<W>) -> EmitResult {
         match self {
             FunctionReference::Local(var) => writer.variable(*var),
-            FunctionReference::Parameter(name) => writer.string(name),
-            FunctionReference::FileScope(name) => writer.string(name),
+            FunctionReference::Parameter(param) => writer.user_defined_identifier(param),
+            FunctionReference::FileScope(name) => writer.user_defined_identifier(name),
+            FunctionReference::Builtin(name) => writer.string(name),
         }
     }
 }
@@ -198,14 +206,14 @@ impl<W: Write> EmitC<W> for Rhs {
         match self {
             Rhs::Void => writer.string("0"),
             Rhs::Null => writer.string("NULL"),
-            Rhs::Parameter(s) => writer.string(s),
+            Rhs::Parameter(s) => writer.user_defined_identifier(s),
             Rhs::Variable(var) => writer.variable(*var),
             Rhs::Dereference(interior) => {
                 writer.string("*")?;
                 writer.emit(interior.as_ref())?;
                 Ok(())
             }
-            Rhs::FileScopeVariable(s) => writer.string(s),
+            Rhs::FileScopeVariable(s) => writer.user_defined_identifier(s),
             Rhs::Literal(literal) => writer.emit(literal),
             Rhs::Operation(op, left, right) => {
                 writer.string("(")?;
@@ -260,7 +268,7 @@ impl<W: Write> EmitC<W> for Rhs {
 impl Function {
     fn emit_c_header<W: Write>(&self, writer: &mut LineWriter<W>) -> EmitResult {
         let interior = |writer: &mut LineWriter<W>| -> EmitResult {
-            writer.string(&self.name)?;
+            writer.user_defined_identifier(&self.name)?;
             writer.string("(")?;
             for (i, pair) in self.parameters.iter().enumerate() {
                 let type_ = &pair.0;
@@ -273,7 +281,7 @@ impl Function {
                 } else {
                     writer.emit(type_)?;
                     writer.space()?;
-                    writer.string(name)?;
+                    writer.user_defined_identifier(name)?;
                 }
                 if i < self.parameters.len() - 1 {
                     writer.string(", ")?;
@@ -408,7 +416,7 @@ impl<W: Write> EmitC<W> for Function {
 impl<W: Write> EmitC<W> for DataType {
     fn emit_c(&self, writer: &mut LineWriter<W>) -> EmitResult {
         writer.string("struct ")?;
-        writer.string(&self.name)?;
+        writer.user_defined_identifier(&self.name)?;
         writer.string("{")?;
         writer.newline()?;
         for (i, field) in self.fields.iter().enumerate() {
@@ -425,6 +433,7 @@ impl<W: Write> EmitC<W> for DataType {
 }
 
 const C_PRELUDE: &str = include_str!("../../prelude/prelude.c");
+const C_EPILOGUE: &str = include_str!("../../prelude/epilogue.c");
 
 impl<W: Write> EmitC<W> for CompilationUnit {
     fn emit_c(&self, writer: &mut LineWriter<W>) -> EmitResult {
@@ -441,6 +450,8 @@ impl<W: Write> EmitC<W> for CompilationUnit {
         for function in self.functions.iter() {
             function.emit_c(writer)?;
         }
+
+        write!(writer, "{}", C_EPILOGUE)?;
 
         Ok(())
     }

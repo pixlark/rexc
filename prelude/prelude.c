@@ -1,9 +1,14 @@
+//#define GC_DEBUG
+//#define GC_DUMP_REGULARLY
+//#define GC_PRINT_STATS
+//#define GC_PRINT_VERBOSE_STATS
+
 #include <bdwgc/include/gc.h>
 #include <stdio.h>
 #include <stdlib.h>
 
 void *alloc(size_t size) {
-    return GC_malloc(size);
+    return GC_MALLOC(size);
 }
 
 void print_unit() {

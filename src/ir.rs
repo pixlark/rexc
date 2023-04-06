@@ -61,6 +61,7 @@ pub enum FunctionReference {
     Local(Variable),
     Parameter(String),
     FileScope(String),
+    Builtin(String),
 }
 
 pub enum Rhs {

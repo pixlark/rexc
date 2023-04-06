@@ -158,11 +158,11 @@ impl FunctionConstructor<'_> {
     fn add_void_function_call(
         &mut self,
         block: ir::BlockLocator,
-        name: String,
+        func: ir::FunctionReference,
         arguments: Vec<ir::Variable>,
     ) {
         let block = self.get_block(block);
-        let rhs = ir::Rhs::FunctionCall(ir::FunctionReference::FileScope(name), arguments);
+        let rhs = ir::Rhs::FunctionCall(func, arguments);
         block.assignments.push(ir::Step::Discarded(rhs));
     }
     fn variable_lookup(&self, name: String) -> ir::Rhs {
@@ -277,7 +277,7 @@ impl Expression {
                     block,
                     ir::Type::Pointer(Box::new(type_ir.clone())),
                     ir::Rhs::FunctionCall(
-                        ir::FunctionReference::FileScope(String::from("alloc")),
+                        ir::FunctionReference::Builtin(String::from("alloc")),
                         vec![sizeof],
                     ),
                 );
@@ -553,7 +553,11 @@ fn body_into_ir(
 
                 let rhs = expression.into_ir(ctor, current_block);
                 let index = ctor.add_assignment(current_block, type_.into_ir(), rhs);
-                ctor.add_void_function_call(current_block, prelude_function_name, vec![index]);
+                ctor.add_void_function_call(
+                    current_block,
+                    ir::FunctionReference::Builtin(prelude_function_name),
+                    vec![index],
+                );
             }
         }
     }
