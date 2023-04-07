@@ -1,0 +1,35 @@
+on:
+  push:
+    branches:
+    - master
+    - develop/*
+  pull_request:
+    branches:
+    - master
+    - develop/*
+  workflow_dispatch:
+
+jobs:
+  test_runner:
+    name: test_runner
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v3
+        with:
+          submodules: recursive
+      - uses: actions/cache@v3
+        with:
+          path: |
+            ~/.cargo/bin/
+            ~/.cargo/registry/index/
+            ~/.cargo/registry/cache/
+            ~/.cargo/git/db/
+            target/
+          key: cargo-${{ hashFiles('**/Cargo.lock') }}
+      - uses: actions/cache@v3
+        with:
+          path: bdwgc-build
+          key: bdwgc-build
+      - run: |
+          echo -e 'n\ny' | ./build-from-scratch.bash
+          python3 lesen/lesen.py run --directory lesen/tests
