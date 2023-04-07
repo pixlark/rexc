@@ -58,7 +58,7 @@ Currently the following platforms are supported:
  - *nix
  - Windows via MSYS2
 
-For any of these, simply run the `build-from-scratch.sh` script.
+For any of these, simply run the `build-from-scratch.bash` script.
 
 ### What features are planned?
 
