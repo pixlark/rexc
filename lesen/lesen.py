@@ -24,6 +24,11 @@ from termcolor import colored, cprint
 
 colorama.just_fix_windows_console()
 
+lesen_exit_code = 0
+def set_bad_exit_code():
+    global lesen_exit_code
+    lesen_exit_code = 1
+
 def print_at_depth(depth, s):
     print('\n'.join(map(lambda c: "  "*depth + c, s.split('\n'))))
 
@@ -109,6 +114,7 @@ def run_test(args, manifest, path, depth):
         print_at_depth(depth, colored(f"* {test_source_basename}...", "green"))
         print_verbose(args, '\n'.join(verbose_information))
     def sad():
+        set_bad_exit_code()
         print_at_depth(depth, colored(f"* {test_source_basename}!", "red"))
         print_verbose(args, '\n'.join(verbose_information))
 
@@ -323,7 +329,8 @@ def main():
         validate_manifest(manifest)
 
         crawl_directory_and_run_tests(args, manifest)
-        return
+
+        sys.exit(lesen_exit_code)
 
     if args['subparser'] == 'generate':
         validate_generate_args(args)
@@ -332,7 +339,8 @@ def main():
         validate_manifest(manifest)
 
         generate_expect_file_from_source(args, manifest)
-        return
+
+        sys.exit(lesen_exit_code)
 
     if args['subparser'] == 'clean':
         validate_clean_args(args)
@@ -341,7 +349,8 @@ def main():
         validate_manifest(manifest)
 
         crawl_directory_and_clean(args, manifest)
-        return
+
+        sys.exit(lesen_exit_code)
 
     raise Exception('Unreachable')
 
