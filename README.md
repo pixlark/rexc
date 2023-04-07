@@ -51,6 +51,15 @@ function appendList(list: *Link, to_append: int) -> *Link {
 }
 ```
 
+### How to build?
+
+Currently the following platforms are supported:
+
+ - *nix
+ - Windows via MSYS2
+
+For any of these, simply run the `build-from-scratch.sh` script.
+
 ### What features are planned?
 
 I have a cornucopia of nebulous ideas floating around my head, but here are a couple concrete ones that I know I want to implement:

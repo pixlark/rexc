@@ -17,6 +17,10 @@ source.exe
 **/.clang-format
 
 # Personal helper scripts
+build.sh
+cargo-test.sh
+generate-stdout.sh
+run-tests.sh
 
 # Boehm build path
 bdwgc-build/

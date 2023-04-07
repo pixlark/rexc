@@ -343,7 +343,7 @@ impl<W: Write> EmitC<W> for Block {
     fn emit_c(&self, writer: &mut LineWriter<W>) -> EmitResult {
         // Label that starts a block
         writer.label(self.locator)?;
-        writer.string(":")?;
+        writer.string(": ;")?;
         writer.newline()?;
         // Block consists of assignments without control flow
         for assignment in self.assignments.iter() {

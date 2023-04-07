@@ -48,7 +48,22 @@ impl std::cmp::PartialEq for Type {
             (Self::Pointer(..), Self::Nil) => true,
             (Self::Nil, Self::Pointer(..)) => true,
             (Self::Pointer(lhs), Self::Pointer(rhs)) => lhs == rhs,
-            (Self::Function(lhs), Self::Function(rhs)) => Rc::ptr_eq(lhs, rhs),
+            (Self::Function(lhs), Self::Function(rhs)) => {
+                let (lhs_return, lhs_params) = lhs.as_ref();
+                let (rhs_return, rhs_params) = rhs.as_ref();
+                if lhs_return != rhs_return {
+                    return false;
+                }
+                if lhs_params.len() != rhs_params.len() {
+                    return false;
+                }
+                for (lhs_param, rhs_param) in lhs_params.iter().zip(rhs_params.iter()) {
+                    if lhs_param != rhs_param {
+                        return false;
+                    }
+                }
+                true
+            }
             (Self::Named((_lhs_name, lhs_type)), Self::Named((_rhs_name, rhs_type))) => {
                 match (lhs_type, rhs_type) {
                     (Some(l), Some(r)) => Rc::ptr_eq(l, r),

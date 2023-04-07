@@ -81,17 +81,9 @@ impl<T, E> OrExit<T> for Result<T, E> {
     }
 }
 
-fn invoke_gcc(
-    file_path: std::path::PathBuf,
-    emit_path: std::path::PathBuf,
-    gcc_path: Option<String>,
-    _flags: CompileFlags,
-) {
-    // TODO(Brooke): This is all very specific to windows msys2...
-    // TODO(Brooke): So much .unwrap here omg please make this good and not a hack!
-
+fn invoke_gcc(file_path: std::path::PathBuf, emit_path: std::path::PathBuf, _flags: CompileFlags) {
     // Assume `invoke_gcc` only called when EMIT_ONLY is not enabled.
-    let gcc_path = gcc_path.unwrap();
+    let gcc_path = which::which("gcc").or_exit("Could not find gcc on the PATH.");
 
     let executable_path = file_path.with_extension("exe");
 
@@ -107,16 +99,13 @@ fn invoke_gcc(
     // TODO(Brooke): Technically we should be supporting non-utf8 paths.
     path.extend(format!(";{}", gcc_dir.to_str().or_exit("Malformed GCC path.")).chars());
 
-    //TODO(Brooke): Technically we should also be supporting UNC paths.
-    let libgc = {
-        let mut path = std::env::current_exe().or_exit("Unable to get path to rexc executable.");
-        path.pop();
-        path.push("libgc.a");
-        dunce::canonicalize(path).or_exit("UNC paths are not currently supported.")
-    };
+    let project_dir = directories::ProjectDirs::from("", "", "rexc")
+        .or_exit("Could not generate project directory data path.");
+    let mut libgc = std::path::PathBuf::from(project_dir.data_dir());
+    libgc.push("libgc.a");
 
     if !libgc.exists() {
-        exit("libgc.a not found! (Should be beside rexc executable).");
+        exit("libgc.a not found! (Have you run `./build-from-scratch.bash`?");
     }
 
     command
@@ -130,7 +119,9 @@ fn invoke_gcc(
                 .or_exit("Path to rexc executable is malformed."),
         )
         .arg("-I")
-        .arg(".");
+        .arg(".")
+        .arg("-l")
+        .arg("pthread");
 
     println!("Invoking gcc...\n    {:?}", command);
 
@@ -141,7 +132,7 @@ fn invoke_gcc(
     }
 }
 
-fn compile(path: std::path::PathBuf, gcc_path: Option<String>, flags: CompileFlags) {
+fn compile(path: std::path::PathBuf, flags: CompileFlags) -> Result<(), ()> {
     let mut path_ok = false;
     if let Some(ext) = path.extension() {
         if ext == "rx" {
@@ -163,7 +154,7 @@ fn compile(path: std::path::PathBuf, gcc_path: Option<String>, flags: CompileFla
             eprintln!("Parse error! Originated at:");
             err.span.error_message();
             eprintln!("  {}", err.kind);
-            return;
+            return Err(());
         }
     };
     let mut parser = parse::Parser::new(lexer);
@@ -173,7 +164,7 @@ fn compile(path: std::path::PathBuf, gcc_path: Option<String>, flags: CompileFla
             eprintln!("Parse error! Originated at:");
             err.span.error_message();
             eprintln!("  {}", err.kind);
-            return;
+            return Err(());
         }
     };
     //dbg!(&ast);
@@ -188,7 +179,7 @@ fn compile(path: std::path::PathBuf, gcc_path: Option<String>, flags: CompileFla
             eprintln!("Type error! Originated at:");
             err.span.error_message();
             eprintln!("  {}", err);
-            return;
+            return Err(());
         }
     }
 
@@ -202,7 +193,7 @@ fn compile(path: std::path::PathBuf, gcc_path: Option<String>, flags: CompileFla
             eprintln!("Error! Originated at:");
             err.span.error_message();
             eprintln!("  {}", err);
-            return;
+            return Err(());
         }
     }
 
@@ -231,15 +222,17 @@ fn compile(path: std::path::PathBuf, gcc_path: Option<String>, flags: CompileFla
     std::fs::write(&emit_path, &emitted_c).or_exit("Couldn't emit C to intermediate file.");
 
     if flags.contains(CompileFlags::EMIT_ONLY) {
-        return;
+        return Ok(());
     }
 
     // 8. Invoke GCC (C source -> Executable)
-    invoke_gcc(path, emit_path, gcc_path, flags);
+    invoke_gcc(path, emit_path, flags);
+
+    Ok(())
 }
 
 fn main() {
-    let mut cmd = clap::Command::new("rexc")
+    let cmd = clap::Command::new("rexc")
         .about("An experimental language")
         .subcommand_required(true)
         .arg_required_else_help(true)
@@ -247,14 +240,9 @@ fn main() {
             clap::Command::new("compile")
                 .about("Invoke the compiler directly on a source file")
                 .arg(clap::arg!(--source <PATH> "The source file to be compiled").required(true))
-                .arg(clap::arg!(--gcc <PATH> "Path to GCC"))
                 .arg(clap::arg!(--"show-emitted" "Print emitted C code to stdout"))
                 .arg(clap::arg!(--"emit-only" "Only emit C code, don't call GCC")),
         );
-    let gcc_path_err = cmd.error(
-        clap::error::ErrorKind::ArgumentConflict,
-        "must provide '--gcc_path'",
-    );
     let matches = cmd.get_matches();
     match matches.subcommand() {
         Some(("compile", sub_matches)) => {
@@ -274,17 +262,10 @@ fn main() {
                     .map_or(false, |b| *b),
             );
 
-            let gcc_path = sub_matches.get_one::<String>("gcc");
-
-            if !flags.contains(CompileFlags::EMIT_ONLY) && gcc_path.is_none() {
-                gcc_path_err.exit();
+            match compile(std::path::PathBuf::from(source.unwrap()), flags) {
+                Ok(()) => {}
+                Err(()) => std::process::exit(1),
             }
-
-            compile(
-                std::path::PathBuf::from(source.unwrap()),
-                gcc_path.cloned(),
-                flags,
-            );
         }
         Some((_, _)) => unreachable!(),
         None => unreachable!(),

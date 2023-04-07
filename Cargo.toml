@@ -2,14 +2,13 @@
 name = "rexc"
 version = "0.1.0"
 edition = "2021"
+default-run = "rexc"
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
 clap = "4"
 bitflags = "1"
-dunce = "1"
 replace_with = "0.1.7"
-
-[build-dependencies]
-cmake = "0.1"
+directories = "5.0.0"
+which = "4.4.0"
