@@ -222,6 +222,15 @@ impl Expression {
             ExpressionKind::Dereference(inner) => {
                 ir::Rhs::Dereference(Box::new(inner.into_ir(ctor, block)))
             }
+            ExpressionKind::UnaryOperation(operation, inner) => {
+                let (type_, expr) = *inner;
+
+                let rhs = expr.into_ir(ctor, block);
+                let var =
+                    ctor.add_assignment(block, type_.expected_from_typechecker().into_ir(), rhs);
+
+                ir::Rhs::UnaryOperation(operation, var)
+            }
             ExpressionKind::Operation(operation, left, right) => {
                 let (left_type, left) = *left;
                 let (right_type, right) = *right;
@@ -428,6 +437,7 @@ fn body_into_ir(
             StatementKind::If(If {
                 condition: (type_, condition),
                 body: if_body,
+                else_: else_body,
             }) => {
                 let type_ = type_.expected_from_typechecker();
                 let rhs = condition.into_ir(ctor, current_block);
@@ -439,24 +449,32 @@ fn body_into_ir(
                     starting_block: body_starting_block,
                     ending_block: body_ending_block,
                 } = body_into_ir(if_body.into_iter().collect(), ctor, break_blocks);
-                // If statement don't have `break`s
-                let post_if_block = ctor.add_block();
+                let BodyInformation {
+                    starting_block: else_starting_block,
+                    ending_block: else_ending_block,
+                } = body_into_ir(else_body.into_iter().collect(), ctor, break_blocks);
+                // If statements don't have `break`s
+                let post_everything = ctor.add_block();
 
-                // b0:
+                // bStart:
                 //   # before if statement
-                //   if (cond) { goto b1; } else { goto bN; }
-                // b1..bN-2:
+                //   if (cond) { goto bIf; } else { goto bElse; }
+                // bIf..bElse-2:
                 //   # body of if statement
-                // bN-1:
+                // bElse-1:
                 //   # ...
-                //   return x; OR goto bN;
-                // bN:
+                //   return x; OR goto bEnd;
+                // bElse..bEnd-2:
+                //   # body of else statement
+                // bEnd-1:
+                //   return x; OR goto bEnd;
+                // bEnd:
                 //   # post if statement
 
                 ctor.add_conditional_jump(
                     current_block,
                     body_starting_block,
-                    post_if_block,
+                    else_starting_block,
                     index,
                     type_ir,
                 );
@@ -464,13 +482,17 @@ fn body_into_ir(
                 match ctor.get_block(body_ending_block).block_terminator {
                     None => {
                         // If the if body's very last block doesn't terminate, then
-                        // it needs to jump forwards to after the if block.
-                        ctor.add_unconditional_jump(body_ending_block, post_if_block);
+                        // it needs to jump forwards to after the if/else block.
+                        ctor.add_unconditional_jump(body_ending_block, post_everything);
                     }
                     Some(ir::BlockTerminator::Branch(None)) => {
                         // Unfilled branches are left in the terminator position
                         // by `break` statements, because they can only be filled
                         // once the loop body is fully constructed.
+
+                        // TODO(Brooke): This should probably be more explicit in the type system,
+                        //               maybe instead of `Option`, use an enum with `Some`, `None`,
+                        //               and `WaitingForBreak`?
                     }
                     Some(ir::BlockTerminator::Return(..)) => {
                         // Return statements make the following code unreachable,
@@ -478,16 +500,28 @@ fn body_into_ir(
                         // to add an additional goto to reach the next block
                     }
                     Some(ir::BlockTerminator::Branch(Some(..))) => {
-                        panic!("Somehow the final block in an if-body has a filled branch already added!");
+                        rexc_panic("Somehow the final block in an if-body has a filled branch already added!");
                     }
                     Some(ir::BlockTerminator::ConditionalBranch(..)) => {
-                        panic!(
-                            "Somehow the final block in an if-body had a condbranch already added!"
+                        rexc_panic(
+                            "Somehow the final block in an if-body has a condbranch already added!",
                         );
                     }
                 }
 
-                current_block = post_if_block;
+                match ctor.get_block(else_ending_block).block_terminator {
+                    None => ctor.add_unconditional_jump(else_ending_block, post_everything),
+                    Some(ir::BlockTerminator::Branch(None)) => {}
+                    Some(ir::BlockTerminator::Return(..)) => {}
+                    Some(ir::BlockTerminator::Branch(Some(..))) => {
+                        rexc_panic("Somehow the final block in an else-body has a filled branch already added!");
+                    }
+                    Some(ir::BlockTerminator::ConditionalBranch(..)) => {
+                        rexc_panic("Somehow the final block in an else-body has a condbranch already added!");
+                    }
+                }
+
+                current_block = post_everything;
             }
             StatementKind::Loop(body) => {
                 let mut break_blocks = Vec::new();
@@ -532,6 +566,7 @@ fn body_into_ir(
 
                 current_block = post_loop_block;
             }
+            StatementKind::While { .. } => should_have_been_desugared(),
             StatementKind::Break => {
                 break_blocks.as_mut().rexc_unwrap("Somehow a break statement was reached wihout a `break_blocks` argument being passed to `body_into_ir`.").push(current_block);
                 ctor.add_unfilled_branch(current_block);

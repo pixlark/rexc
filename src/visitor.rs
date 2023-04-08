@@ -49,6 +49,13 @@ pub fn walk_expression<E, V: Visitor<E>>(
         | ExpressionKind::Literal(..)
         | ExpressionKind::Variable(..) => {}
         ExpressionKind::Dereference(inner) => visitor.visit_expression(inner)?,
+        ExpressionKind::UnaryOperation(_, inner) => {
+            let (type_, expr) = inner.as_mut();
+            if let Some(t) = type_ {
+                visitor.visit_type(t)?;
+            }
+            visitor.visit_expression(expr)?;
+        }
         ExpressionKind::Operation(_, lhs, rhs) => {
             let (lhs_type, lhs) = lhs.as_mut();
             let (rhs_type, rhs) = rhs.as_mut();
@@ -140,6 +147,7 @@ pub fn walk_statement<E, V: Visitor<E>>(
         StatementKind::If(If {
             condition: (cond_type, cond),
             body,
+            else_,
         }) => {
             if let Some(t) = cond_type {
                 visitor.visit_type(t)?;
@@ -148,8 +156,23 @@ pub fn walk_statement<E, V: Visitor<E>>(
             for statement in body {
                 visitor.visit_statement(statement)?;
             }
+            for statement in else_ {
+                visitor.visit_statement(statement)?;
+            }
         }
         StatementKind::Loop(body) => {
+            for statement in body {
+                visitor.visit_statement(statement)?;
+            }
+        }
+        StatementKind::While {
+            condition: (cond_type, cond_expr),
+            body,
+        } => {
+            if let Some(t) = cond_type {
+                visitor.visit_type(t)?;
+            }
+            visitor.visit_expression(cond_expr)?;
             for statement in body {
                 visitor.visit_statement(statement)?;
             }

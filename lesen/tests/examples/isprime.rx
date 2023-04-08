@@ -1,9 +1,6 @@
 function modulus(x: int, base: int) -> int {
     var counter: int = x
-    loop {
-        if counter < base {
-            break
-        }
+    while counter >= base {
         counter = counter - base
     }
     return counter
@@ -14,10 +11,7 @@ function isprime(p: int) -> bool {
         return false
     }
     var divisor: int = 2
-    loop {
-        if divisor == p {
-            break
-        }
+    while divisor != p {
         if modulus(p, divisor) == 0 {
             return false
         }

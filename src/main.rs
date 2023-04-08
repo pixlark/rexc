@@ -28,6 +28,8 @@
 //!       intermediate representation and uses it to write out a .c file, which
 //!       can then be compiled into our final executable.
 
+#![allow(clippy::wrong_self_convention)]
+
 mod ast;
 mod backend;
 mod construct;
@@ -167,7 +169,6 @@ fn compile(path: std::path::PathBuf, flags: CompileFlags) -> Result<(), ()> {
             return Err(());
         }
     };
-    //dbg!(&ast);
 
     // 2. Pre-Typecheck Desugaring (Sugared Untyped AST -> Partially Desugared Untyped AST)
     ast.desugar_pre_typecheck();

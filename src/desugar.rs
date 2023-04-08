@@ -106,12 +106,49 @@ impl Visitor<()> for AutomaticDereferenceFieldAccess {
 }
 
 //
+// WhileLoopDesugar:
+//  Transform a `while` loop into a `loop` with `if`.
+//
+
+struct WhileLoopDesugar;
+
+impl Visitor<()> for WhileLoopDesugar {
+    fn visit_statement(&mut self, statement: &mut Statement) -> Result<(), ()> {
+        if let StatementKind::While { .. } = &mut statement.kind {
+            replace_with::replace_with(statement, Dummy::dummy, |statement| {
+                let (condition, body) = match statement.kind {
+                    StatementKind::While { condition, body } => (condition, body),
+                    _ => unreachable!(),
+                };
+                let new_body = vec![Statement {
+                    kind: StatementKind::If(If {
+                        condition,
+                        body,
+                        else_: vec![Statement {
+                            kind: StatementKind::Break,
+                            span: Span::Empty,
+                        }],
+                    }),
+                    span: statement.span.clone(),
+                }];
+                Statement {
+                    kind: StatementKind::Loop(new_body),
+                    span: statement.span,
+                }
+            })
+        }
+        walk_statement(self, statement)
+    }
+}
+
+//
 // Overall desugar phase
 //
 
 impl File {
     pub fn desugar_pre_typecheck(&mut self) {
         self.elided_void_returns();
+        let _ = WhileLoopDesugar.visit_file(self);
     }
     pub fn desugar_post_typecheck(&mut self) {
         let _ = AutomaticDereferenceFieldAccess.visit_file(self);

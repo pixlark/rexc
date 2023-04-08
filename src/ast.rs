@@ -101,6 +101,7 @@ pub enum ExpressionKind {
     Literal(Literal),
     Variable(String),
     Dereference(Box<Expression>),
+    UnaryOperation(ir::UnaryOperation, Box<InferredTypedExpression>),
     Operation(
         ir::Operation,
         Box<InferredTypedExpression>,
@@ -169,6 +170,7 @@ pub struct SetVariable {
 pub struct If {
     pub condition: InferredTypedExpression,
     pub body: Vec<Statement>,
+    pub else_: Vec<Statement>,
 }
 
 #[derive(Debug)]
@@ -178,6 +180,10 @@ pub enum StatementKind {
     SetVariable(SetVariable),
     Return(InferredTypedExpression),
     If(If),
+    While {
+        condition: InferredTypedExpression,
+        body: Vec<Statement>,
+    },
     Loop(Vec<Statement>),
     Break,
     // NOTE: Temporary, eventually print will be function in the standard

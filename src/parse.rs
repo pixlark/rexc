@@ -1,7 +1,7 @@
 use std::{cell::RefCell, collections::VecDeque, rc::Rc};
 
 use super::ast::*;
-use super::ir::Operation;
+use super::ir::{Operation, UnaryOperation};
 
 #[derive(Clone)]
 pub enum Span {
@@ -38,10 +38,12 @@ pub enum TokenKind {
     Identifier(String),
     // Keywords
     Alloc,
+    And,
     At,
     Bool,
     Break,
     Data,
+    Else,
     False,
     Func,
     Function,
@@ -50,10 +52,13 @@ pub enum TokenKind {
     Loop,
     New,
     Nil,
+    Not,
+    Or,
     Print,
     Return,
     True,
     Var,
+    While,
     // Symbols
     Dot,
     Comma,
@@ -94,10 +99,12 @@ impl std::fmt::Display for TokenKind {
             self, fmt,
             Newline, "\\n",
             Alloc, "alloc",
+            And, "and",
             At, "at",
             Bool, "bool",
             Break, "break",
             Data, "data",
+            Else, "else",
             False, "false",
             Func, "func",
             Function, "function",
@@ -106,10 +113,13 @@ impl std::fmt::Display for TokenKind {
             Loop, "loop",
             New, "new",
             Nil, "nil",
+            Not, "not",
+            Or, "or",
             Print, "print",
             Return, "return",
             True, "true",
             Var, "var",
+            While, "while",
             Dot, ".",
             Comma, ",",
             OpenParen, "(",
@@ -471,10 +481,12 @@ impl Lexer {
             let ident = buf.into_iter().collect::<String>();
             let kw = match ident.as_str() {
                 "alloc" => Some(TokenKind::Alloc),
+                "and" => Some(TokenKind::And),
                 "at" => Some(TokenKind::At),
                 "bool" => Some(TokenKind::Bool),
                 "break" => Some(TokenKind::Break),
                 "data" => Some(TokenKind::Data),
+                "else" => Some(TokenKind::Else),
                 "false" => Some(TokenKind::False),
                 "func" => Some(TokenKind::Func),
                 "function" => Some(TokenKind::Function),
@@ -483,10 +495,13 @@ impl Lexer {
                 "loop" => Some(TokenKind::Loop),
                 "new" => Some(TokenKind::New),
                 "nil" => Some(TokenKind::Nil),
+                "not" => Some(TokenKind::Not),
+                "or" => Some(TokenKind::Or),
                 "print" => Some(TokenKind::Print),
                 "return" => Some(TokenKind::Return),
                 "true" => Some(TokenKind::True),
                 "var" => Some(TokenKind::Var),
+                "while" => Some(TokenKind::While),
                 _ => None,
             };
             return Ok(Some(if let Some(kw) = kw {
@@ -896,9 +911,26 @@ impl Parser {
         }
         self.field_access()
     }
+    fn unary_operations(&mut self) -> Result<Expression, ParseError> {
+        if let Some(Token {
+            kind: TokenKind::Not,
+            ..
+        }) = self.lexer.current()?
+        {
+            let span = self.lexer.consume().unwrap().unwrap().span;
+            return Ok(Expression {
+                kind: ExpressionKind::UnaryOperation(
+                    UnaryOperation::Not,
+                    Box::new((None, self.unary_operations()?)),
+                ),
+                span,
+            });
+        }
+        self.dereference()
+    }
     left_assoc_operator! {
         fn multiplicative_operators,
-        dereference,
+        unary_operations,
         vec![
             (TokenKind::Asterisk, Operation::Multiply),
             (TokenKind::ForwardSlash, Operation::Divide),
@@ -928,6 +960,20 @@ impl Parser {
         vec![
             (TokenKind::Equals, Operation::Equals),
             (TokenKind::NotEquals, Operation::NotEquals),
+        ]
+    }
+    left_assoc_operator! {
+        fn and_operator,
+        equality_operators,
+        vec![
+            (TokenKind::And, Operation::And),
+        ]
+    }
+    left_assoc_operator! {
+        fn or_operator,
+        and_operator,
+        vec![
+            (TokenKind::Or, Operation::Or),
         ]
     }
     fn new_field(&mut self) -> Result<(String, Expression), ParseError> {
@@ -978,7 +1024,7 @@ impl Parser {
                 span,
             })
         } else {
-            self.equality_operators()
+            self.or_operator()
         }
     }
     fn expression(&mut self) -> Result<Expression, ParseError> {
@@ -1125,10 +1171,22 @@ impl Parser {
 
         let body = self.body()?;
 
+        let else_ = if let Some(Token {
+            kind: TokenKind::Else,
+            ..
+        }) = self.lexer.current()?
+        {
+            self.lexer.consume().unwrap().unwrap();
+            self.body()?
+        } else {
+            Vec::new()
+        };
+
         Ok(Statement::new(
             StatementKind::If(If {
                 condition: (None, condition),
                 body,
+                else_,
             }),
             span,
         ))
@@ -1140,63 +1198,20 @@ impl Parser {
 
         Ok(Statement::new(StatementKind::Loop(body), span))
     }
-    /*
-    fn assignment(&mut self) -> Result<Statement, ParseError> {
-        let mut deref_count = 0;
-        while let Some(Token {
-            kind: TokenKind::At,
-            ..
-        }) = self.lexer.current()?
-        {
-            deref_count += 1;
-            self.lexer.consume().unwrap();
-        }
+    fn while_(&mut self) -> Result<Statement, ParseError> {
+        let span = self.lexer.consume().unwrap().unwrap().span;
 
-        let name = expect!(
-            self,
-            expect TokenKind::Identifier(name),
-            take move || name,
-            error vec!["identifier"]
-        );
-
-        let mut fields = Vec::new();
-        while let Some(Token {
-            kind: TokenKind::Dot,
-            ..
-        }) = self.lexer.current()?
-        {
-            self.lexer.consume().unwrap();
-            let field = expect!(
-                self,
-                expect TokenKind::Identifier(id),
-                take move || id,
-                error vec!["identifier"]
-            );
-            fields.push(field);
-        }
-
-        let span = expect!(
-            self,
-            expect TokenKind::AssignEquals,
-            take move || span,
-            error vec!["'='"],
-            span
-        );
-
-        let expr = self.expression()?;
+        let condition = self.expression()?;
+        let body = self.body()?;
 
         Ok(Statement::new(
-            StatementKind::SetVariable(SetVariable {
-                lhs: LValue {
-                    name,
-                    fields,
-                    derefs: deref_count,
-                },
-                rhs: (None, expr),
-            }),
+            StatementKind::While {
+                condition: (None, condition),
+                body,
+            },
             span,
         ))
-    }*/
+    }
     fn statement(&mut self) -> Result<Statement, ParseError> {
         let current = self.lexer.current()?;
         //
@@ -1219,6 +1234,10 @@ impl Parser {
                 kind: TokenKind::Loop,
                 ..
             }) => return self.loop_(),
+            Some(Token {
+                kind: TokenKind::While,
+                ..
+            }) => return self.while_(),
             Some(Token {
                 kind: TokenKind::Break,
                 span,

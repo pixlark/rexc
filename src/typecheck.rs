@@ -16,7 +16,7 @@ use super::parse::Span;
 pub enum TypeErrorKind {
     BadVariableDeclarationType(String),
     BadReturnType,
-    IncompatibleOperands(ir::Operation),
+    IncompatibleOperand,
     UnboundVariable(String),
     AssignedWrongTypeToVariable(ast::LValue),
     CalledNonFunction(String),
@@ -31,6 +31,7 @@ pub enum TypeErrorKind {
     ShadowedVariable(String),
     MutatedNonLocalVariable(String),
     RecursiveDataType,
+    ConditionNotBool,
 }
 
 #[derive(Debug)]
@@ -50,12 +51,8 @@ impl std::fmt::Display for TypeError {
             TypeErrorKind::BadReturnType => {
                 write!(f, "Returned expression's type does not match return type.")
             }
-            TypeErrorKind::IncompatibleOperands(op) => {
-                write!(
-                    f,
-                    "Operation {:?} has incompatible left/right operands.",
-                    op
-                )
+            TypeErrorKind::IncompatibleOperand => {
+                write!(f, "Incompatible operand(s) supplied to operator.")
             }
             TypeErrorKind::UnboundVariable(var) => {
                 write!(f, "Variable {} is used but was never bound.", var)
@@ -110,6 +107,9 @@ impl std::fmt::Display for TypeError {
             }
             TypeErrorKind::RecursiveDataType => {
                 write!(f, "Type is recursive and has infinite size! (Try using a pointer for recursive references.)")
+            }
+            TypeErrorKind::ConditionNotBool => {
+                write!(f, "Statement condition is not a bool.")
             }
         }
     }
@@ -234,6 +234,22 @@ impl ast::Type {
     }
 }
 
+impl ir::UnaryOperation {
+    fn accepts(&self, type_: &ast::Type) -> bool {
+        match self {
+            Self::Not => matches!(type_, ast::Type::Bool),
+        }
+    }
+    fn produce(&self, type_: &ast::Type) -> ast::Type {
+        match self {
+            Self::Not => match type_ {
+                ast::Type::Bool => ast::Type::Bool,
+                _ => unreachable!(),
+            },
+        }
+    }
+}
+
 impl ir::Operation {
     fn accepts(&self, left: &ast::Type, right: &ast::Type) -> bool {
         match self {
@@ -257,6 +273,7 @@ impl ir::Operation {
                 (ast::Type::Nil, ast::Type::Pointer(..)) => true,
                 _ => false,
             },
+            Self::And | Self::Or => matches!((left, right), (ast::Type::Bool, ast::Type::Bool)),
         }
     }
     fn produce(&self, lhs: &ast::Type, rhs: &ast::Type) -> ast::Type {
@@ -278,6 +295,10 @@ impl ir::Operation {
                 (ast::Type::Pointer(..), ast::Type::Pointer(..)) => ast::Type::Bool,
                 (ast::Type::Pointer(..), ast::Type::Nil) => ast::Type::Bool,
                 (ast::Type::Nil, ast::Type::Pointer(..)) => ast::Type::Bool,
+                _ => unreachable!(),
+            },
+            Self::And | Self::Or => match (lhs, rhs) {
+                (ast::Type::Bool, ast::Type::Bool) => ast::Type::Bool,
                 _ => unreachable!(),
             },
         }
@@ -330,6 +351,19 @@ impl ast::Expression {
                 ast::Literal::Int(_) => Ok(ast::Type::Int),
                 ast::Literal::Bool(_) => Ok(ast::Type::Bool),
             },
+            ast::ExpressionKind::UnaryOperation(op, inner) => {
+                let (unfilled_type, expr) = inner.as_mut();
+                let infer = expr.typecheck(type_map, name_map)?;
+                if !op.accepts(&infer) {
+                    return Err(TypeError {
+                        kind: TypeErrorKind::IncompatibleOperand,
+                        span: self.span.clone(),
+                    });
+                }
+                *unfilled_type = Some(infer.clone());
+                let produced_type = op.produce(&infer);
+                Ok(produced_type)
+            }
             ast::ExpressionKind::Operation(op, lhs, rhs) => {
                 let (lhs_unfilled_type, lhs) = lhs.as_mut();
                 let (rhs_unfilled_type, rhs) = rhs.as_mut();
@@ -339,7 +373,7 @@ impl ast::Expression {
 
                 if !op.accepts(&infer_left, &infer_right) {
                     return Err(TypeError {
-                        kind: TypeErrorKind::IncompatibleOperands(*op),
+                        kind: TypeErrorKind::IncompatibleOperand,
                         span: self.span.clone(),
                     });
                 }
@@ -625,13 +659,27 @@ impl ast::Statement {
             ast::StatementKind::If(ast::If {
                 condition: (unfilled_type, expression),
                 body,
+                else_,
             }) => {
                 let infer_type = expression.typecheck(type_map, name_map)?;
-                // TODO: This should give an error if the condition expression isn't a bool
+
+                if infer_type != ast::Type::Bool {
+                    return Err(TypeError {
+                        kind: TypeErrorKind::ConditionNotBool,
+                        span: self.span.clone(),
+                    });
+                }
+
                 *unfilled_type = Some(infer_type);
 
                 name_map.push_scope();
                 for statement in body {
+                    statement.typecheck(type_map, name_map, function_returns.clone())?;
+                }
+                name_map.pop_scope();
+
+                name_map.push_scope();
+                for statement in else_ {
                     statement.typecheck(type_map, name_map, function_returns.clone())?;
                 }
                 name_map.pop_scope();
@@ -643,6 +691,7 @@ impl ast::Statement {
                 }
                 name_map.pop_scope();
             }
+            ast::StatementKind::While { .. } => should_have_been_desugared(),
             ast::StatementKind::Break => {}
             ast::StatementKind::Print((unfilled_type, expression)) => {
                 let infer_type = expression.typecheck(type_map, name_map)?;

@@ -1,7 +1,7 @@
 function main() -> int {
     var x: int = 0
     loop {
-        if x {
+        if x > 0 {
             break
         }
         print(x)

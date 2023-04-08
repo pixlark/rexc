@@ -44,6 +44,11 @@ pub enum Literal {
 }
 
 #[derive(Copy, Clone, Debug)]
+pub enum UnaryOperation {
+    Not,
+}
+
+#[derive(Copy, Clone, Debug)]
 pub enum Operation {
     Add,
     Subtract,
@@ -55,6 +60,8 @@ pub enum Operation {
     GreaterThan,
     LessThanOrEqualTo,
     GreaterThanOrEqualTo,
+    And,
+    Or,
 }
 
 pub enum FunctionReference {
@@ -82,6 +89,7 @@ pub enum Rhs {
     Dereference(Box<Rhs>),
     FileScopeVariable(String),
     Literal(Literal),
+    UnaryOperation(UnaryOperation, Variable),
     Operation(Operation, Variable, Variable),
     FunctionCall(FunctionReference, Vec<Variable>),
     SizeOf(Type),

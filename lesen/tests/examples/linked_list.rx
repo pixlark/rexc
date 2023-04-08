@@ -27,10 +27,7 @@ function appendList(list: *Link, to_append: int) -> *Link {
         return alloc(new Link { value = to_append, next = nil })
     }
     var iter: *Link = list
-    loop {
-        if iter.next == nil {
-            break
-        }
+    while iter.next != nil {
         iter = iter.next
     }
     iter.next = alloc(new Link { value = to_append, next = nil })

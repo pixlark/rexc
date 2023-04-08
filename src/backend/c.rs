@@ -215,6 +215,15 @@ impl<W: Write> EmitC<W> for Rhs {
             }
             Rhs::FileScopeVariable(s) => writer.user_defined_identifier(s),
             Rhs::Literal(literal) => writer.emit(literal),
+            Rhs::UnaryOperation(op, var) => {
+                writer.string(match *op {
+                    UnaryOperation::Not => "!",
+                })?;
+                writer.string("(")?;
+                writer.variable(*var)?;
+                writer.string(")")?;
+                Ok(())
+            }
             Rhs::Operation(op, left, right) => {
                 writer.string("(")?;
                 writer.variable(*left)?;
@@ -230,6 +239,8 @@ impl<W: Write> EmitC<W> for Rhs {
                     Operation::GreaterThan => ">",
                     Operation::LessThanOrEqualTo => "<=",
                     Operation::GreaterThanOrEqualTo => ">=",
+                    Operation::And => "&&",
+                    Operation::Or => "||",
                 })?;
                 writer.space()?;
                 writer.variable(*right)?;
