@@ -33,6 +33,7 @@
 mod ast;
 mod backend;
 mod construct;
+mod delayed;
 mod desugar;
 mod error;
 mod ice;

@@ -8,6 +8,7 @@ use std::collections::HashMap;
 use std::rc::Rc;
 
 use crate::ast;
+use crate::delayed::*;
 use crate::ice::{InternalCompilerError::*, *};
 use crate::ir;
 use crate::parse::Span;
@@ -217,7 +218,7 @@ impl ast::Type {
         match self {
             ast::Type::Named((name, unfilled_data_type)) => match type_map.get(name) {
                 Some(TypeBinding::Complete(t)) => {
-                    *unfilled_data_type = Some(t);
+                    unfilled_data_type.assert_fill(t);
                     Ok(TypedStatus::Ok)
                 }
                 Some(TypeBinding::Incomplete) => Ok(TypedStatus::Incomplete),
@@ -358,7 +359,7 @@ impl ast::Expression {
                         span: self.span.clone(),
                     });
                 }
-                *unfilled_type = Some(infer.clone());
+                unfilled_type.assert_fill(infer.clone());
                 let produced_type = op.produce(&infer);
                 Ok(produced_type)
             }
@@ -376,8 +377,8 @@ impl ast::Expression {
                     });
                 }
 
-                *lhs_unfilled_type = Some(infer_left.clone());
-                *rhs_unfilled_type = Some(infer_right.clone());
+                lhs_unfilled_type.assert_fill(infer_left.clone());
+                rhs_unfilled_type.assert_fill(infer_right.clone());
 
                 let produced_type = op.produce(&infer_left, &infer_right);
                 Ok(produced_type)
@@ -424,11 +425,11 @@ impl ast::Expression {
                                     span: self.span.clone(),
                                 });
                             }
-                            *unfilled_type = Some(arg_type.clone());
+                            unfilled_type.assert_fill(arg_type.clone());
                         }
 
                         let returns = &rc.0;
-                        *unfilled_type = Some(returns.clone());
+                        unfilled_type.assert_fill(returns.clone());
                         Ok(returns.clone())
                     }
                     _ => Err(TypeError {
@@ -440,7 +441,7 @@ impl ast::Expression {
             ast::ExpressionKind::Allocate(ite) => {
                 let (unfilled_type, expression) = ite.as_mut();
                 let inferred_type = expression.typecheck(type_map, name_map)?;
-                *unfilled_type = Some(inferred_type.clone());
+                unfilled_type.assert_fill(inferred_type.clone());
                 Ok(ast::Type::Pointer(Box::new(inferred_type)))
             }
             ast::ExpressionKind::New((unfilled_type, ast::New { name, fields })) => {
@@ -454,8 +455,8 @@ impl ast::Expression {
                         })
                     }
                 };
-                let full_type = ast::Type::Named((name.clone(), Some(type_.clone())));
-                *unfilled_type = Some(full_type.clone());
+                let full_type = ast::Type::Named((name.clone(), Filled(type_.clone())));
+                unfilled_type.assert_fill(full_type.clone());
                 if fields.len() != type_.borrow().fields.len() {
                     return Err(TypeError {
                         kind: TypeErrorKind::WrongFieldCount(
@@ -505,10 +506,10 @@ impl ast::Expression {
 
                 // Check if we need to do an automatic dereference to access
                 // the field behind a pointer.
-                *needs_dereference = Some(false);
+                needs_dereference.assert_fill(false);
                 if let ast::Type::Pointer(inner) = &lhs_type {
                     lhs_check_type = inner;
-                    *needs_dereference = Some(true);
+                    needs_dereference.overwrite(true);
                 }
 
                 let data_type = match lhs_check_type {
@@ -521,12 +522,12 @@ impl ast::Expression {
                     }
                 };
 
-                *lhs_unfilled_type = Some(lhs_type);
+                lhs_unfilled_type.assert_fill(lhs_type);
 
                 let data_type = data_type.unwrap_with_ice(UnfilledTypeInference);
                 let type_ = data_type.borrow().check_field_access(field)?;
 
-                *unfilled_type = Some(type_.clone());
+                unfilled_type.assert_fill(type_.clone());
                 Ok(type_)
             }
         }
@@ -574,10 +575,10 @@ impl ast::LValue {
                 let mut lhs_check_type = &lhs_type;
 
                 // Check if we need to automatically dereference to access the field
-                *needs_dereference = Some(false);
+                needs_dereference.assert_fill(false);
                 if let ast::Type::Pointer(inner) = &lhs_type {
                     lhs_check_type = inner;
-                    *needs_dereference = Some(true);
+                    needs_dereference.overwrite(true);
                 }
 
                 let data_type = match lhs_check_type {
@@ -595,7 +596,7 @@ impl ast::LValue {
                 field_type
             }
         };
-        self.type_ = Some(type_.clone());
+        self.type_ = Filled(type_.clone());
         Ok(type_)
     }
 }
@@ -609,7 +610,7 @@ impl ast::Statement {
     ) -> Result<(), TypeError> {
         match &mut self.kind {
             ast::StatementKind::BareExpression((unfilled_type, expression)) => {
-                *unfilled_type = Some(expression.typecheck(type_map, name_map)?);
+                unfilled_type.assert_fill(expression.typecheck(type_map, name_map)?);
             }
             ast::StatementKind::MakeVariable(ast::MakeVariable { type_, lhs, rhs }) => {
                 type_.typecheck(type_map, &self.span)?.unwrap();
@@ -642,7 +643,7 @@ impl ast::Statement {
                         span: self.span.clone(),
                     });
                 }
-                *unfilled_type = Some(rhs_type);
+                unfilled_type.assert_fill(rhs_type);
             }
             ast::StatementKind::Return((unfilled_type, expression)) => {
                 let infer_type = expression.typecheck(type_map, name_map)?;
@@ -652,7 +653,7 @@ impl ast::Statement {
                         span: self.span.clone(),
                     });
                 }
-                *unfilled_type = Some(infer_type);
+                unfilled_type.assert_fill(infer_type);
             }
             ast::StatementKind::If(ast::If {
                 condition: (unfilled_type, expression),
@@ -668,7 +669,7 @@ impl ast::Statement {
                     });
                 }
 
-                *unfilled_type = Some(infer_type);
+                unfilled_type.assert_fill(infer_type);
 
                 name_map.push_scope();
                 for statement in body {
@@ -693,7 +694,7 @@ impl ast::Statement {
             ast::StatementKind::Break => {}
             ast::StatementKind::Print((unfilled_type, expression)) => {
                 let infer_type = expression.typecheck(type_map, name_map)?;
-                *unfilled_type = Some(infer_type);
+                unfilled_type.assert_fill(infer_type);
             }
         }
         Ok(())

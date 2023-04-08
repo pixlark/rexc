@@ -2,6 +2,7 @@
 //! overriding some of the default `visit_*` implementations
 
 use crate::ast::*;
+use crate::delayed::*;
 
 pub trait Visitor<E>: Sized {
     fn visit_lvalue(&mut self, lvalue: &mut LValue) -> Result<(), E> {
@@ -51,7 +52,7 @@ pub fn walk_expression<E, V: Visitor<E>>(
         ExpressionKind::Dereference(inner) => visitor.visit_expression(inner)?,
         ExpressionKind::UnaryOperation(_, inner) => {
             let (type_, expr) = inner.as_mut();
-            if let Some(t) = type_ {
+            if let Filled(t) = type_ {
                 visitor.visit_type(t)?;
             }
             visitor.visit_expression(expr)?;
@@ -59,21 +60,21 @@ pub fn walk_expression<E, V: Visitor<E>>(
         ExpressionKind::Operation(_, lhs, rhs) => {
             let (lhs_type, lhs) = lhs.as_mut();
             let (rhs_type, rhs) = rhs.as_mut();
-            if let Some(t) = lhs_type {
+            if let Filled(t) = lhs_type {
                 visitor.visit_type(t)?;
             }
-            if let Some(t) = rhs_type {
+            if let Filled(t) = rhs_type {
                 visitor.visit_type(t)?;
             }
             visitor.visit_expression(lhs)?;
             visitor.visit_expression(rhs)?;
         }
         ExpressionKind::FunctionCall(type_, _, arguments) => {
-            if let Some(t) = type_ {
+            if let Filled(t) = type_ {
                 visitor.visit_type(t)?;
             }
             for (arg_type, arg) in arguments {
-                if let Some(t) = arg_type {
+                if let Filled(t) = arg_type {
                     visitor.visit_type(t)?;
                 }
                 visitor.visit_expression(arg)?;
@@ -81,13 +82,13 @@ pub fn walk_expression<E, V: Visitor<E>>(
         }
         ExpressionKind::Allocate(ite) => {
             let (type_, expression) = ite.as_mut();
-            if let Some(t) = type_ {
+            if let Filled(t) = type_ {
                 visitor.visit_type(t)?;
             }
             visitor.visit_expression(expression)?;
         }
         ExpressionKind::New((type_, New { name: _, fields })) => {
-            if let Some(t) = type_ {
+            if let Filled(t) = type_ {
                 visitor.visit_type(t)?;
             }
             for (_, field_expression) in fields {
@@ -100,11 +101,11 @@ pub fn walk_expression<E, V: Visitor<E>>(
             field: _,
             needs_dereference: _,
         } => {
-            if let Some(t) = type_ {
+            if let Filled(t) = type_ {
                 visitor.visit_type(t)?;
             }
             let (lhs_type, lhs) = lhs.as_mut();
-            if let Some(t) = lhs_type {
+            if let Filled(t) = lhs_type {
                 visitor.visit_type(t)?;
             }
             visitor.visit_expression(lhs)?;
@@ -119,7 +120,7 @@ pub fn walk_statement<E, V: Visitor<E>>(
 ) -> Result<(), E> {
     match &mut statement.kind {
         StatementKind::BareExpression((type_, expression)) => {
-            if let Some(t) = type_ {
+            if let Filled(t) = type_ {
                 visitor.visit_type(t)?;
             }
             visitor.visit_expression(expression)?;
@@ -133,13 +134,13 @@ pub fn walk_statement<E, V: Visitor<E>>(
             rhs: (rhs_type, rhs),
         }) => {
             visitor.visit_lvalue(lhs)?;
-            if let Some(t) = rhs_type {
+            if let Filled(t) = rhs_type {
                 visitor.visit_type(t)?;
             }
             visitor.visit_expression(rhs)?;
         }
         StatementKind::Return((type_, expression)) => {
-            if let Some(t) = type_ {
+            if let Filled(t) = type_ {
                 visitor.visit_type(t)?;
             }
             visitor.visit_expression(expression)?;
@@ -149,7 +150,7 @@ pub fn walk_statement<E, V: Visitor<E>>(
             body,
             else_,
         }) => {
-            if let Some(t) = cond_type {
+            if let Filled(t) = cond_type {
                 visitor.visit_type(t)?;
             }
             visitor.visit_expression(cond)?;
@@ -169,7 +170,7 @@ pub fn walk_statement<E, V: Visitor<E>>(
             condition: (cond_type, cond_expr),
             body,
         } => {
-            if let Some(t) = cond_type {
+            if let Filled(t) = cond_type {
                 visitor.visit_type(t)?;
             }
             visitor.visit_expression(cond_expr)?;
@@ -179,7 +180,7 @@ pub fn walk_statement<E, V: Visitor<E>>(
         }
         StatementKind::Break => {}
         StatementKind::Print((type_, expression)) => {
-            if let Some(t) = type_ {
+            if let Filled(t) = type_ {
                 visitor.visit_type(t)?;
             }
             visitor.visit_expression(expression)?;

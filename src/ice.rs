@@ -1,10 +1,13 @@
 use std::io::Write;
 
+use crate::delayed::*;
+
 #[derive(Debug)]
 pub enum InternalCompilerError {
     // General-use
     Unreachable,
     AssertionFailure,
+    DelayedAlreadyFilled,
     // Desugarer
     ShouldHaveBeenDesugared,
     // Typechecker
@@ -46,7 +49,14 @@ impl InternalCompilerError {
     pub fn abort(&self) -> ! {
         eprint!("{}", self);
         std::io::stderr().flush();
-        std::process::abort();
+        if cfg!(debug_assertions) {
+            // In debug mode, we panic! for our abort because that
+            // gives us automatic backtraces.
+            panic!("InternalCompilerError");
+        } else {
+            // Otherwise we do a normal abort.
+            std::process::abort();
+        }
     }
 }
 
@@ -59,6 +69,15 @@ impl<T> InternalCompilerErrorable<T> for Option<T> {
         match self {
             Some(t) => t,
             None => err.abort(),
+        }
+    }
+}
+
+impl<T> InternalCompilerErrorable<T> for Delayed<T> {
+    fn unwrap_with_ice(self, err: InternalCompilerError) -> T {
+        match self {
+            Filled(t) => t,
+            Empty => err.abort(),
         }
     }
 }

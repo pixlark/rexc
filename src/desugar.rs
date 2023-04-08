@@ -1,4 +1,5 @@
 use crate::ast::*;
+use crate::delayed::*;
 use crate::ice::{InternalCompilerError::*, *};
 use crate::parse::Span;
 use crate::visitor::*;
@@ -23,7 +24,7 @@ impl File {
                 if elided {
                     function.body.push(Statement::new(
                         StatementKind::Return((
-                            None,
+                            Empty,
                             Expression::new(ExpressionKind::Unit, Span::Empty),
                         )),
                         Span::Empty,
@@ -52,10 +53,10 @@ impl Visitor<()> for AutomaticDereferenceFieldAccess {
         } = &mut expression.kind
         {
             if needs_dereference.unwrap_with_ice(UnfilledTypecheckerData) {
-                *needs_dereference = Some(false);
+                needs_dereference.overwrite(false);
                 replace_with::replace_with(
                     lhs,
-                    || Box::new((None, Dummy::dummy())),
+                    || Box::new((Empty, Dummy::dummy())),
                     |lhs| {
                         let (lhs_type, lhs_expression) = *lhs;
                         let lhs_type = lhs_type.unwrap_with_ice(UnfilledTypecheckerData);
@@ -64,7 +65,7 @@ impl Visitor<()> for AutomaticDereferenceFieldAccess {
                             _ => ice_error!(InvalidTypecheckerData),
                         };
                         Box::new((
-                            Some(lhs_inner_type),
+                            Filled(lhs_inner_type),
                             Expression {
                                 kind: ExpressionKind::Dereference(Box::new(lhs_expression)),
                                 span: Span::Empty,
@@ -84,7 +85,7 @@ impl Visitor<()> for AutomaticDereferenceFieldAccess {
         } = &mut lvalue.kind
         {
             if needs_dereference.unwrap_with_ice(UnfilledTypecheckerData) {
-                *needs_dereference = Some(false);
+                needs_dereference.overwrite(false);
                 replace_with::replace_with(
                     lhs,
                     || Box::new(Dummy::dummy()),
@@ -96,7 +97,7 @@ impl Visitor<()> for AutomaticDereferenceFieldAccess {
                             };
                         Box::new(LValue {
                             kind: LValueKind::Dereference(lhs),
-                            type_: Some(inner_type),
+                            type_: Filled(inner_type),
                         })
                     },
                 );
@@ -192,7 +193,7 @@ impl Dummy for LValue {
     fn dummy() -> Self {
         Self {
             kind: LValueKind::Identifier(Default::default()),
-            type_: None,
+            type_: Empty,
         }
     }
 }

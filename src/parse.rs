@@ -1,6 +1,7 @@
 use std::{cell::RefCell, collections::VecDeque, rc::Rc};
 
 use crate::ast::*;
+use crate::delayed::*;
 use crate::ice::*;
 use crate::ir::{Operation, UnaryOperation};
 
@@ -625,8 +626,8 @@ macro_rules! left_assoc_operator {
                         lhs = Expression {
                             kind: ExpressionKind::Operation(
                                 op.1,
-                                Box::new((None, lhs)),
-                                Box::new((None, rhs)),
+                                Box::new((Empty, lhs)),
+                                Box::new((Empty, rhs)),
                             ),
                             span: tok_span,
                         };
@@ -698,11 +699,11 @@ impl Expression {
                 type_: _,
                 field,
                 lhs,
-                needs_dereference: None,
+                needs_dereference: Empty,
             } => Ok(LValue::new(LValueKind::FieldAccess {
                 lhs: Box::new(lhs.1.to_lvalue()?),
                 field,
-                needs_dereference: None,
+                needs_dereference: Empty,
             })),
             _ => Err(ParseError {
                 kind: ParseErrorKind::InvalidLValue,
@@ -828,9 +829,9 @@ impl Parser {
                     }
                     return Ok(Expression::new(
                         ExpressionKind::FunctionCall(
-                            None,
+                            Empty,
                             name,
-                            interior.into_iter().map(|e| (None, e)).collect(),
+                            interior.into_iter().map(|e| (Empty, e)).collect(),
                         ),
                         span,
                     ));
@@ -862,7 +863,7 @@ impl Parser {
                         return self.error_expected(vec!["')'"], end);
                     }
                     return Ok(Expression::new(
-                        ExpressionKind::Allocate(Box::new((None, interior))),
+                        ExpressionKind::Allocate(Box::new((Empty, interior))),
                         span,
                     ));
                 }
@@ -888,10 +889,10 @@ impl Parser {
             );
             lhs = Expression {
                 kind: ExpressionKind::FieldAccess {
-                    type_: None,
-                    lhs: Box::new((None, lhs)),
+                    type_: Empty,
+                    lhs: Box::new((Empty, lhs)),
                     field: ident,
-                    needs_dereference: None,
+                    needs_dereference: Empty,
                 },
                 span,
             };
@@ -922,7 +923,7 @@ impl Parser {
             return Ok(Expression {
                 kind: ExpressionKind::UnaryOperation(
                     UnaryOperation::Not,
-                    Box::new((None, self.unary_operations()?)),
+                    Box::new((Empty, self.unary_operations()?)),
                 ),
                 span,
             });
@@ -1021,7 +1022,7 @@ impl Parser {
                 error vec!["'}'"]
             );
             Ok(Expression {
-                kind: ExpressionKind::New((None, New { name, fields })),
+                kind: ExpressionKind::New((Empty, New { name, fields })),
                 span,
             })
         } else {
@@ -1089,7 +1090,7 @@ impl Parser {
             Some(Token {
                 kind: TokenKind::Identifier(name),
                 ..
-            }) => Ok(Type::Named((name, None))),
+            }) => Ok(Type::Named((name, Empty))),
             _ => self.error_expected(vec!["int", "bool", "func"], tok),
         }
     }
@@ -1135,14 +1136,14 @@ impl Parser {
 
         if self.lexer.is_newline() {
             return Ok(Statement::new(
-                StatementKind::Return((None, Expression::new(ExpressionKind::Unit, span.clone()))),
+                StatementKind::Return((Empty, Expression::new(ExpressionKind::Unit, span.clone()))),
                 span,
             ));
         }
 
         let inner = self.expression()?;
 
-        Ok(Statement::new(StatementKind::Return((None, inner)), span))
+        Ok(Statement::new(StatementKind::Return((Empty, inner)), span))
     }
     fn print_(&mut self) -> Result<Statement, ParseError> {
         let span = self.lexer.consume().unwrap().unwrap().span;
@@ -1161,7 +1162,7 @@ impl Parser {
             Some(Token {
                 kind: TokenKind::CloseParen,
                 ..
-            }) => Ok(Statement::new(StatementKind::Print((None, inner)), span)),
+            }) => Ok(Statement::new(StatementKind::Print((Empty, inner)), span)),
             _ => self.error_expected(vec!["')'"], end),
         }
     }
@@ -1185,7 +1186,7 @@ impl Parser {
 
         Ok(Statement::new(
             StatementKind::If(If {
-                condition: (None, condition),
+                condition: (Empty, condition),
                 body,
                 else_,
             }),
@@ -1207,7 +1208,7 @@ impl Parser {
 
         Ok(Statement::new(
             StatementKind::While {
-                condition: (None, condition),
+                condition: (Empty, condition),
                 body,
             },
             span,
@@ -1276,7 +1277,7 @@ impl Parser {
             return Ok(Statement::new(
                 StatementKind::SetVariable(SetVariable {
                     lhs: lvalue,
-                    rhs: (None, expr),
+                    rhs: (Empty, expr),
                 }),
                 span,
             ));
@@ -1287,7 +1288,7 @@ impl Parser {
         //
         let span = expr.span.clone();
         Ok(Statement::new(
-            StatementKind::BareExpression((None, expr)),
+            StatementKind::BareExpression((Empty, expr)),
             span,
         ))
     }

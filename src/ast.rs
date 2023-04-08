@@ -4,6 +4,7 @@
 use std::cell::RefCell;
 use std::rc::Rc;
 
+use crate::delayed::*;
 use crate::ice::{InternalCompilerError::*, *};
 use crate::ir;
 use crate::parse::Span;
@@ -25,10 +26,10 @@ pub enum Type {
     Bool,
     Pointer(Box<Type>),
     Function(Rc<(Type, Vec<Type>)>),
-    /// `Option<Rc<RefCell<DataType>>>` is a mouthful, so here's
+    /// `Delayed<Rc<RefCell<DataType>>>` is a mouthful, so here's
     /// an explanation:
     ///   - Before typechecking, names have not been resolved
-    ///     into data types yet, so `Option` represents whether
+    ///     into data types yet, so `Delayed` represents whether
     ///     a type is "filled" or not
     ///   - There will likely be multiple references to a data
     ///     type, so `Rc` ensures we can share it to multiple
@@ -39,7 +40,7 @@ pub enum Type {
     ///     reference to that data type to perform the typecheck.
     ///     In that specific circumstance, shared mutability is
     ///     required, so `RefCell` allows us to do that
-    Named((String, Option<Rc<RefCell<DataType>>>)),
+    Named((String, Delayed<Rc<RefCell<DataType>>>)),
 }
 
 impl std::cmp::PartialEq for Type {
@@ -66,7 +67,7 @@ impl std::cmp::PartialEq for Type {
             }
             (Self::Named((_lhs_name, lhs_type)), Self::Named((_rhs_name, rhs_type))) => {
                 match (lhs_type, rhs_type) {
-                    (Some(l), Some(r)) => Rc::ptr_eq(l, r),
+                    (Filled(l), Filled(r)) => Rc::ptr_eq(l, r),
                     _ => ice_error!(ComparedUntypedDataTypeReferences),
                 }
             }
@@ -77,8 +78,7 @@ impl std::cmp::PartialEq for Type {
 
 impl std::cmp::Eq for Type {}
 
-pub type InferredType = Option<Type>;
-pub type InferredTypedExpression = (InferredType, Expression);
+pub type InferredTypedExpression = (Delayed<Type>, Expression);
 
 #[derive(Debug)]
 pub enum Literal {
@@ -107,14 +107,14 @@ pub enum ExpressionKind {
         Box<InferredTypedExpression>,
         Box<InferredTypedExpression>,
     ),
-    FunctionCall(InferredType, String, Vec<InferredTypedExpression>),
+    FunctionCall(Delayed<Type>, String, Vec<InferredTypedExpression>),
     Allocate(Box<InferredTypedExpression>),
-    New((InferredType, New)),
+    New((Delayed<Type>, New)),
     FieldAccess {
-        type_: InferredType,
+        type_: Delayed<Type>,
         lhs: Box<InferredTypedExpression>,
         field: String,
-        needs_dereference: Option<bool>,
+        needs_dereference: Delayed<bool>,
     },
 }
 
@@ -144,19 +144,19 @@ pub enum LValueKind {
     FieldAccess {
         lhs: Box<LValue>,
         field: String,
-        needs_dereference: Option<bool>,
+        needs_dereference: Delayed<bool>,
     },
 }
 
 #[derive(Debug, Clone)]
 pub struct LValue {
     pub kind: LValueKind,
-    pub type_: Option<Type>,
+    pub type_: Delayed<Type>,
 }
 
 impl LValue {
     pub fn new(kind: LValueKind) -> LValue {
-        LValue { kind, type_: None }
+        LValue { kind, type_: Empty }
     }
 }
 

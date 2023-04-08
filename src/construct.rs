@@ -7,6 +7,7 @@
 use std::collections::HashMap;
 
 use crate::ast::*;
+use crate::delayed::*;
 use crate::ice::{InternalCompilerError::*, *};
 use crate::ir;
 
@@ -120,20 +121,20 @@ impl FunctionConstructor<'_> {
     fn add_unfilled_branch(&mut self, from_block: ir::BlockLocator) {
         let from_block = self.get_block(from_block);
         ice_assert!(from_block.block_terminator.is_none());
-        from_block.block_terminator = Some(ir::BlockTerminator::Branch(None));
+        from_block.block_terminator = Some(ir::BlockTerminator::Branch(Empty));
     }
     fn fill_unfilled_branch(&mut self, from_block: ir::BlockLocator, to_block: ir::BlockLocator) {
         let from_block = self.get_block(from_block);
         ice_assert!(matches!(
             from_block.block_terminator,
-            Some(ir::BlockTerminator::Branch(None))
+            Some(ir::BlockTerminator::Branch(Empty))
         ));
-        from_block.block_terminator = Some(ir::BlockTerminator::Branch(Some(to_block)));
+        from_block.block_terminator = Some(ir::BlockTerminator::Branch(Filled(to_block)));
     }
     fn add_unconditional_jump(&mut self, from_block: ir::BlockLocator, to_block: ir::BlockLocator) {
         let from_block = self.get_block(from_block);
         ice_assert!(from_block.block_terminator.is_none());
-        from_block.block_terminator = Some(ir::BlockTerminator::Branch(Some(to_block)));
+        from_block.block_terminator = Some(ir::BlockTerminator::Branch(Filled(to_block)));
     }
     fn add_conditional_jump(
         &mut self,
@@ -317,7 +318,7 @@ impl Expression {
                 let var = ctor.add_uninitialized_assignment(block, ir::Type::Named(name));
 
                 let data_type = match &type_ {
-                    Some(Type::Named((_, Some(type_), ..))) => type_.clone(),
+                    Filled(Type::Named((_, Filled(type_), ..))) => type_.clone(),
                     _ => ice_error!(InvalidTypeInference),
                 };
 
@@ -344,7 +345,7 @@ impl Expression {
                 let interior = interior.1;
 
                 let field = match &lhs_type {
-                    Type::Named((_, Some(data_type))) => data_type.borrow().get_field(&field),
+                    Type::Named((_, Filled(data_type))) => data_type.borrow().get_field(&field),
                     _ => ice_error!(InvalidTypeInference),
                 };
 
@@ -379,7 +380,9 @@ impl LValue {
                 needs_dereference: _,
             } => {
                 let field = match &lhs.type_ {
-                    Some(Type::Named((_, Some(data_type)))) => data_type.borrow().get_field(field),
+                    Filled(Type::Named((_, Filled(data_type)))) => {
+                        data_type.borrow().get_field(field)
+                    }
                     _ => ice_error!(InvalidTypeInference),
                 };
                 ir::LValue::FieldAccess(Box::new(lhs.into_ir(ctor)), field)
@@ -393,9 +396,8 @@ struct BodyInformation {
     ending_block: ir::BlockLocator,
 }
 
-// TODO(Brooke): This should really take an iterator, not a Vec
-fn body_into_ir(
-    body: Vec<Statement>,
+fn body_into_ir<StmtIter: Iterator<Item = Statement>>(
+    body: StmtIter,
     ctor: &mut FunctionConstructor,
     break_blocks: &mut Option<&mut Vec<ir::BlockLocator>>,
 ) -> BodyInformation {
@@ -450,11 +452,11 @@ fn body_into_ir(
                 let BodyInformation {
                     starting_block: body_starting_block,
                     ending_block: body_ending_block,
-                } = body_into_ir(if_body.into_iter().collect(), ctor, break_blocks);
+                } = body_into_ir(if_body.into_iter(), ctor, break_blocks);
                 let BodyInformation {
                     starting_block: else_starting_block,
                     ending_block: else_ending_block,
-                } = body_into_ir(else_body.into_iter().collect(), ctor, break_blocks);
+                } = body_into_ir(else_body.into_iter(), ctor, break_blocks);
                 // If statements don't have `break`s
                 let post_everything = ctor.add_block();
 
@@ -487,21 +489,17 @@ fn body_into_ir(
                         // it needs to jump forwards to after the if/else block.
                         ctor.add_unconditional_jump(body_ending_block, post_everything);
                     }
-                    Some(ir::BlockTerminator::Branch(None)) => {
+                    Some(ir::BlockTerminator::Branch(Empty)) => {
                         // Unfilled branches are left in the terminator position
                         // by `break` statements, because they can only be filled
                         // once the loop body is fully constructed.
-
-                        // TODO(Brooke): This should probably be more explicit in the type system,
-                        //               maybe instead of `Option`, use an enum with `Some`, `None`,
-                        //               and `WaitingForBreak`?
                     }
                     Some(ir::BlockTerminator::Return(..)) => {
                         // Return statements make the following code unreachable,
                         // so when there's a return statement we don't bother trying
                         // to add an additional goto to reach the next block
                     }
-                    Some(ir::BlockTerminator::Branch(Some(..))) => {
+                    Some(ir::BlockTerminator::Branch(Filled(..))) => {
                         ice_error!(InvalidBlockTerminator);
                     }
                     Some(ir::BlockTerminator::ConditionalBranch(..)) => {
@@ -511,9 +509,9 @@ fn body_into_ir(
 
                 match ctor.get_block(else_ending_block).block_terminator {
                     None => ctor.add_unconditional_jump(else_ending_block, post_everything),
-                    Some(ir::BlockTerminator::Branch(None)) => {}
+                    Some(ir::BlockTerminator::Branch(Empty)) => {}
                     Some(ir::BlockTerminator::Return(..)) => {}
-                    Some(ir::BlockTerminator::Branch(Some(..))) => {
+                    Some(ir::BlockTerminator::Branch(Filled(..))) => {
                         ice_error!(InvalidBlockTerminator);
                     }
                     Some(ir::BlockTerminator::ConditionalBranch(..)) => {
@@ -530,11 +528,7 @@ fn body_into_ir(
                 let BodyInformation {
                     starting_block: body_starting_block,
                     ending_block: body_ending_block,
-                } = body_into_ir(
-                    body.into_iter().collect(),
-                    ctor,
-                    &mut Some(&mut break_blocks),
-                );
+                } = body_into_ir(body.into_iter(), ctor, &mut Some(&mut break_blocks));
 
                 ctor.add_unconditional_jump(current_block, body_starting_block);
 
@@ -620,7 +614,7 @@ impl Function {
             .map(|(t, s)| (t.into_ir(), s))
             .collect();
 
-        body_into_ir(self.body.into_iter().collect(), &mut ctor, &mut None);
+        body_into_ir(self.body.into_iter(), &mut ctor, &mut None);
 
         ctor.construct()
     }

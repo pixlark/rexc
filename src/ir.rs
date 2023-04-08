@@ -2,6 +2,8 @@
 //! code. This is just in case we ever want to emit to LLVM or something...
 //! as it is, we're just emitting C.
 
+use crate::delayed::*;
+
 #[derive(Debug, Copy, Clone)]
 pub struct BlockLocator(pub usize);
 
@@ -126,7 +128,7 @@ pub type TypedVariable = (Type, Variable);
 pub enum BlockTerminator {
     /// Branch terminators spend some of their time "unfilled" during IR construction
     /// because some block locators aren't known until later.
-    Branch(Option<BlockLocator>),
+    Branch(Delayed<BlockLocator>),
     ConditionalBranch(BlockLocator, BlockLocator, TypedVariable),
     Return(Variable, Type),
 }
