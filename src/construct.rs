@@ -6,9 +6,9 @@
 
 use std::collections::HashMap;
 
-use super::ast::*;
-use super::internal_error::*;
-use super::ir;
+use crate::ast::*;
+use crate::ice::{InternalCompilerError::*, *};
+use crate::ir;
 
 struct BlockConstructor {
     locator: ir::BlockLocator,
@@ -38,9 +38,9 @@ impl BlockConstructor {
         ir::Block {
             locator: self.locator,
             assignments: self.assignments,
-            block_terminator: self.block_terminator.rexc_unwrap(
-                "Somehow .construct() was called on a BlockConstructor that has no terminator!",
-            ),
+            block_terminator: self
+                .block_terminator
+                .unwrap_with_ice(ConstructedFromIncompleteConstructor),
         }
     }
 }
@@ -60,9 +60,9 @@ impl FunctionConstructor<'_> {
     fn construct(self) -> ir::Function {
         ir::Function {
             name: self.name,
-            returns: self.returns.rexc_unwrap(
-                "Somehow .construct() was called on a FunctionConstructor that has no return type!",
-            ),
+            returns: self
+                .returns
+                .unwrap_with_ice(ConstructedFromIncompleteConstructor),
             parameters: self.parameters,
             body: self.body.into_iter().map(|b| b.construct()).collect(),
         }
@@ -114,17 +114,17 @@ impl FunctionConstructor<'_> {
     }
     fn add_return(&mut self, block: ir::BlockLocator, type_: ir::Type, var: ir::Variable) {
         let block = self.get_block(block);
-        rexc_assert(block.block_terminator.is_none());
+        ice_assert!(block.block_terminator.is_none());
         block.block_terminator = Some(ir::BlockTerminator::Return(var, type_));
     }
     fn add_unfilled_branch(&mut self, from_block: ir::BlockLocator) {
         let from_block = self.get_block(from_block);
-        rexc_assert(from_block.block_terminator.is_none());
+        ice_assert!(from_block.block_terminator.is_none());
         from_block.block_terminator = Some(ir::BlockTerminator::Branch(None));
     }
     fn fill_unfilled_branch(&mut self, from_block: ir::BlockLocator, to_block: ir::BlockLocator) {
         let from_block = self.get_block(from_block);
-        rexc_assert(matches!(
+        ice_assert!(matches!(
             from_block.block_terminator,
             Some(ir::BlockTerminator::Branch(None))
         ));
@@ -132,7 +132,7 @@ impl FunctionConstructor<'_> {
     }
     fn add_unconditional_jump(&mut self, from_block: ir::BlockLocator, to_block: ir::BlockLocator) {
         let from_block = self.get_block(from_block);
-        rexc_assert(from_block.block_terminator.is_none());
+        ice_assert!(from_block.block_terminator.is_none());
         from_block.block_terminator = Some(ir::BlockTerminator::Branch(Some(to_block)));
     }
     fn add_conditional_jump(
@@ -144,7 +144,7 @@ impl FunctionConstructor<'_> {
         condition_type: ir::Type,
     ) {
         let from_block = self.get_block(from_block);
-        rexc_assert(from_block.block_terminator.is_none());
+        ice_assert!(from_block.block_terminator.is_none());
         from_block.block_terminator = Some(ir::BlockTerminator::ConditionalBranch(
             to_block,
             else_block,
@@ -171,14 +171,14 @@ impl FunctionConstructor<'_> {
         } else {
             let mut params_with_name = self.parameters.iter().filter(|(_, s)| s == &name);
             let param = params_with_name.next();
-            rexc_assert(params_with_name.next().is_none());
+            ice_assert!(params_with_name.next().is_none());
             if let Some((_, param)) = param {
                 ir::Rhs::Parameter(String::from(param))
             } else {
                 let var = self
                     .variable_map
                     .get(&name)
-                    .rexc_unwrap("Somehow a variable was never added to the variable map!");
+                    .unwrap_with_ice(UnboundVariableInConstructPhase);
                 ir::Rhs::Variable(*var)
             }
         }
@@ -204,7 +204,12 @@ impl Type {
 
 impl DataType {
     fn get_field(&self, name: &str) -> ir::Field {
-        let (field_index, _) = self.fields.iter().enumerate().find(|(_, (_, s))| s == name).rexc_unwrap("Somehow a new expression passed the typechecker with a field assignment that's not in the associated data type!");
+        let (field_index, _) = self
+            .fields
+            .iter()
+            .enumerate()
+            .find(|(_, (_, s))| s == name)
+            .unwrap_with_ice(InvalidTypecheckerData);
         ir::Field(field_index)
     }
 }
@@ -226,8 +231,11 @@ impl Expression {
                 let (type_, expr) = *inner;
 
                 let rhs = expr.into_ir(ctor, block);
-                let var =
-                    ctor.add_assignment(block, type_.expected_from_typechecker().into_ir(), rhs);
+                let var = ctor.add_assignment(
+                    block,
+                    type_.unwrap_with_ice(UnfilledTypeInference).into_ir(),
+                    rhs,
+                );
 
                 ir::Rhs::UnaryOperation(operation, var)
             }
@@ -238,26 +246,26 @@ impl Expression {
                 let left_rhs = left.into_ir(ctor, block);
                 let left = ctor.add_assignment(
                     block,
-                    left_type.expected_from_typechecker().into_ir(),
+                    left_type.unwrap_with_ice(UnfilledTypeInference).into_ir(),
                     left_rhs,
                 );
                 // Create SSA assignment chain for right expression
                 let right_rhs = right.into_ir(ctor, block);
                 let right = ctor.add_assignment(
                     block,
-                    right_type.expected_from_typechecker().into_ir(),
+                    right_type.unwrap_with_ice(UnfilledTypeInference).into_ir(),
                     right_rhs,
                 );
                 // Return new RHS which uses those chains
                 ir::Rhs::Operation(operation, left, right)
             }
             ExpressionKind::FunctionCall(type_, name, arguments) => {
-                let _type = type_.expected_from_typechecker();
+                let _type = type_.unwrap_with_ice(UnfilledTypeInference);
 
                 // Create SSA assignment chain for each argument
                 let mut arg_vars = Vec::new();
                 for (arg_type, argument) in arguments {
-                    let arg_type = arg_type.expected_from_typechecker();
+                    let arg_type = arg_type.unwrap_with_ice(UnfilledTypeInference);
                     let arg_type = arg_type.into_ir();
                     let rhs = argument.into_ir(ctor, block);
                     arg_vars.push(ctor.add_assignment(block, arg_type, rhs));
@@ -276,7 +284,7 @@ impl Expression {
             }
             ExpressionKind::Allocate(ite) => {
                 let (type_, expr) = *ite;
-                let type_ = type_.expected_from_typechecker();
+                let type_ = type_.unwrap_with_ice(UnfilledTypeInference);
                 let type_ir = type_.into_ir();
 
                 // Allocate the space
@@ -309,10 +317,8 @@ impl Expression {
                 let var = ctor.add_uninitialized_assignment(block, ir::Type::Named(name));
 
                 let data_type = match &type_ {
-                    Some(Type::Named((_, Some(type_), ..))) => {
-                        type_.clone()
-                    }
-                    _ => rexc_panic("Somehow a new expression was annotated with a non-datatype type, or was not annotated at all!")
+                    Some(Type::Named((_, Some(type_), ..))) => type_.clone(),
+                    _ => ice_error!(InvalidTypeInference),
                 };
 
                 for (field_name, expression) in fields {
@@ -334,14 +340,12 @@ impl Expression {
                 needs_dereference: _,
             } => {
                 //let lhs_type = interior.0.rexc_unwrap("Somehow a field access expression passed the typechecker without having its interior type filled in!");
-                let lhs_type = interior.0.expected_from_typechecker();
+                let lhs_type = interior.0.unwrap_with_ice(UnfilledTypeInference);
                 let interior = interior.1;
 
                 let field = match &lhs_type {
-                    Type::Named((_, Some(data_type))) => {
-                        data_type.borrow().get_field(&field)
-                    },
-                    _ => rexc_panic("Somehow a field access expression *not* on a data structure passed the typechecker!"),
+                    Type::Named((_, Some(data_type))) => data_type.borrow().get_field(&field),
+                    _ => ice_error!(InvalidTypeInference),
                 };
 
                 let ir_type = lhs_type.into_ir();
@@ -362,8 +366,8 @@ impl LValue {
                 match var {
                     ir::Rhs::Variable(var) => ir::LValue::Variable(var),
                     ir::Rhs::Parameter(param) => ir::LValue::Parameter(param),
-                    ir::Rhs::FileScopeVariable(..) => rexc_panic("Somehow an lvalue that resolves to a non-local variable passed the typechecker."),
-                    _ => unreachable!(),
+                    ir::Rhs::FileScopeVariable(..) => ice_error!(InvalidTypecheckerData),
+                    _ => ice_unreachable!(),
                 }
             }
             LValueKind::Dereference(inner) => {
@@ -375,10 +379,8 @@ impl LValue {
                 needs_dereference: _,
             } => {
                 let field = match &lhs.type_ {
-                    Some(Type::Named((_, Some(data_type)))) => {
-                        data_type.borrow().get_field(field)
-                    },
-                    _ => rexc_panic("Somehow a field access lvalue *not* on a data structure passed the typechecker!"),
+                    Some(Type::Named((_, Some(data_type)))) => data_type.borrow().get_field(field),
+                    _ => ice_error!(InvalidTypeInference),
                 };
                 ir::LValue::FieldAccess(Box::new(lhs.into_ir(ctor)), field)
             }
@@ -403,7 +405,7 @@ fn body_into_ir(
     for statement in body {
         match statement.kind {
             StatementKind::BareExpression((type_, expression)) => {
-                let _type = type_.expected_from_typechecker().into_ir();
+                let _type = type_.unwrap_with_ice(UnfilledTypeInference).into_ir();
                 let rhs = expression.into_ir(ctor, current_block);
 
                 ctor.add_discarded_value(current_block, rhs);
@@ -425,7 +427,7 @@ fn body_into_ir(
                 ctor.add_reassignment(current_block, ir_lhs, ir_rhs);
             }
             StatementKind::Return((type_, expression)) => {
-                let type_ = type_.expected_from_typechecker();
+                let type_ = type_.unwrap_with_ice(UnfilledTypeInference);
                 let rhs = expression.into_ir(ctor, current_block);
                 let type_ir = type_.into_ir();
                 let index = ctor.add_assignment(current_block, type_ir.clone(), rhs);
@@ -439,7 +441,7 @@ fn body_into_ir(
                 body: if_body,
                 else_: else_body,
             }) => {
-                let type_ = type_.expected_from_typechecker();
+                let type_ = type_.unwrap_with_ice(UnfilledTypeInference);
                 let rhs = condition.into_ir(ctor, current_block);
                 let type_ir = type_.into_ir();
                 let index = ctor.add_assignment(current_block, type_ir.clone(), rhs);
@@ -500,12 +502,10 @@ fn body_into_ir(
                         // to add an additional goto to reach the next block
                     }
                     Some(ir::BlockTerminator::Branch(Some(..))) => {
-                        rexc_panic("Somehow the final block in an if-body has a filled branch already added!");
+                        ice_error!(InvalidBlockTerminator);
                     }
                     Some(ir::BlockTerminator::ConditionalBranch(..)) => {
-                        rexc_panic(
-                            "Somehow the final block in an if-body has a condbranch already added!",
-                        );
+                        ice_error!(InvalidBlockTerminator);
                     }
                 }
 
@@ -514,10 +514,10 @@ fn body_into_ir(
                     Some(ir::BlockTerminator::Branch(None)) => {}
                     Some(ir::BlockTerminator::Return(..)) => {}
                     Some(ir::BlockTerminator::Branch(Some(..))) => {
-                        rexc_panic("Somehow the final block in an else-body has a filled branch already added!");
+                        ice_error!(InvalidBlockTerminator);
                     }
                     Some(ir::BlockTerminator::ConditionalBranch(..)) => {
-                        rexc_panic("Somehow the final block in an else-body has a condbranch already added!");
+                        ice_error!(InvalidBlockTerminator);
                     }
                 }
 
@@ -566,16 +566,19 @@ fn body_into_ir(
 
                 current_block = post_loop_block;
             }
-            StatementKind::While { .. } => should_have_been_desugared(),
+            StatementKind::While { .. } => ice_error!(ShouldHaveBeenDesugared),
             StatementKind::Break => {
-                break_blocks.as_mut().rexc_unwrap("Somehow a break statement was reached wihout a `break_blocks` argument being passed to `body_into_ir`.").push(current_block);
+                break_blocks
+                    .as_mut()
+                    .unwrap_with_ice(Unreachable)
+                    .push(current_block);
                 ctor.add_unfilled_branch(current_block);
                 // If we don't break we might continue the loop and start constructing
                 // unreachable post-break code!
                 break;
             }
             StatementKind::Print((type_, expression)) => {
-                let type_ = type_.expected_from_typechecker();
+                let type_ = type_.unwrap_with_ice(UnfilledTypeInference);
                 let prelude_function_name = String::from(match type_ {
                     Type::Unit => "print_unit",
                     Type::Nil => "print_nil",

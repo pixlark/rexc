@@ -1,4 +1,5 @@
-use super::parse::Span;
+use crate::ice::*;
+use crate::parse::Span;
 
 impl Span {
     pub fn error_message(&self) {
@@ -14,7 +15,7 @@ impl Span {
         };
         let bytes = source.as_bytes();
         let key_point = match self {
-            Span::Empty => unreachable!(),
+            Span::Empty => ice_unreachable!(),
             Span::Eof { .. } => bytes.len() - 1,
             Span::Char { pos, .. } => *pos,
             Span::Range { start, .. } => *start,

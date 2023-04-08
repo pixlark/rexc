@@ -3,8 +3,8 @@
 
 use std::io::{LineWriter, Result, Write};
 
-use super::super::internal_error::*;
-use super::super::ir::*;
+use crate::ice::{InternalCompilerError::*, *};
+use crate::ir::*;
 
 pub type EmitResult = Result<()>;
 
@@ -120,7 +120,7 @@ fn emit_function_pointer<W: Write>(
                 Ok(())
             }
             Type::Pointer(inner) => helper(w, *inner, interior, pointer_count + 1),
-            _ => unreachable!(),
+            _ => ice_unreachable!(),
         }
     }
     helper(w, f, interior, 0)
@@ -323,9 +323,7 @@ impl<W: Write> EmitC<W> for BlockTerminator {
         match self {
             BlockTerminator::Branch(to) => {
                 writer.string("goto ")?;
-                writer.label(to.rexc_unwrap(
-                    "Somehow the C emitter got hold of an unfilled Branch instruction.",
-                ))?;
+                writer.label(to.unwrap_with_ice(InvalidBlockTerminator))?;
                 writer.string(";")?;
                 writer.newline()?;
             }

@@ -1,6 +1,6 @@
-use super::ast::*;
-use super::parse::Span;
-use super::visitor::*;
+use crate::ast::*;
+use crate::parse::Span;
+use crate::visitor::*;
 
 #[derive(Debug, Clone)]
 pub enum ValidationErrorKind {

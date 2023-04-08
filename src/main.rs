@@ -35,7 +35,7 @@ mod backend;
 mod construct;
 mod desugar;
 mod error;
-mod internal_error;
+mod ice;
 mod ir;
 mod parse;
 mod typecheck;
@@ -47,7 +47,7 @@ use std::rc::Rc;
 use bitflags::bitflags;
 
 use backend::c::EmitC;
-use internal_error::*;
+use ice::{InternalCompilerError::*, *};
 
 bitflags! {
     struct CompileFlags: u32 {
@@ -205,13 +205,12 @@ fn compile(path: std::path::PathBuf, flags: CompileFlags) -> Result<(), ()> {
     let mut writer = std::io::LineWriter::new(Vec::new());
 
     ir_.emit_c(&mut writer)
-        .rexc_unwrap("There was an error with the C backend!");
+        .or_exit("There was an IO error when emitting via the C backend.");
 
     let buffer = writer
         .into_inner()
-        .rexc_unwrap("There was an error with the C backend!");
-    let emitted_c =
-        String::from_utf8(buffer).rexc_unwrap("Somehow the C backend emitted invalid UTF-8!");
+        .or_exit("There was an IO error when emitting via the C backend.");
+    let emitted_c = String::from_utf8(buffer).unwrap_with_ice(EmittedInvalidUTF8);
 
     // TODO(Brooke): Only emit to string if we're printing the emitted code, otherwise
     //               emit directly to the `emit_path` file.
@@ -268,7 +267,7 @@ fn main() {
                 Err(()) => std::process::exit(1),
             }
         }
-        Some((_, _)) => unreachable!(),
-        None => unreachable!(),
+        Some((_, _)) => ice_unreachable!(),
+        None => ice_unreachable!(),
     }
 }

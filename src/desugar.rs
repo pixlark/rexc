@@ -1,7 +1,7 @@
-use super::ast::*;
-use super::internal_error::*;
-use super::parse::Span;
-use super::visitor::*;
+use crate::ast::*;
+use crate::ice::{InternalCompilerError::*, *};
+use crate::parse::Span;
+use crate::visitor::*;
 
 //
 // elided_void_returns:
@@ -51,18 +51,18 @@ impl Visitor<()> for AutomaticDereferenceFieldAccess {
             needs_dereference,
         } = &mut expression.kind
         {
-            if needs_dereference.expected_from_typechecker() {
+            if needs_dereference.unwrap_with_ice(UnfilledTypecheckerData) {
                 *needs_dereference = Some(false);
                 replace_with::replace_with(
                     lhs,
                     || Box::new((None, Dummy::dummy())),
                     |lhs| {
                         let (lhs_type, lhs_expression) = *lhs;
-                        let lhs_type = lhs_type.expected_from_typechecker();
+                        let lhs_type = lhs_type.unwrap_with_ice(UnfilledTypecheckerData);
                         let lhs_inner_type = match lhs_type {
-                                Type::Pointer(inner) => *inner,
-                                _ => rexc_panic("Somehow a FieldAccess expression was tagged as `needs_dereference` even though it's not of type Type::Pointer!"),
-                            };
+                            Type::Pointer(inner) => *inner,
+                            _ => ice_error!(InvalidTypecheckerData),
+                        };
                         Box::new((
                             Some(lhs_inner_type),
                             Expression {
@@ -83,15 +83,16 @@ impl Visitor<()> for AutomaticDereferenceFieldAccess {
             needs_dereference,
         } = &mut lvalue.kind
         {
-            if needs_dereference.expected_from_typechecker() {
+            if needs_dereference.unwrap_with_ice(UnfilledTypecheckerData) {
                 *needs_dereference = Some(false);
                 replace_with::replace_with(
                     lhs,
                     || Box::new(Dummy::dummy()),
                     |lhs| {
-                        let inner_type = match lhs.type_.as_ref().expected_from_typechecker() {
+                        let inner_type =
+                            match lhs.type_.as_ref().unwrap_with_ice(UnfilledTypecheckerData) {
                                 Type::Pointer(inner) => *inner.clone(),
-                                _ => rexc_panic("Somehow a FieldAccess lvalue was tagged as `needs_dereference` even though it's not of type Type::Pointer!"),
+                                _ => ice_error!(InvalidTypecheckerData),
                             };
                         Box::new(LValue {
                             kind: LValueKind::Dereference(lhs),
@@ -118,7 +119,7 @@ impl Visitor<()> for WhileLoopDesugar {
             replace_with::replace_with(statement, Dummy::dummy, |statement| {
                 let (condition, body) = match statement.kind {
                     StatementKind::While { condition, body } => (condition, body),
-                    _ => unreachable!(),
+                    _ => ice_unreachable!(),
                 };
                 let new_body = vec![Statement {
                     kind: StatementKind::If(If {

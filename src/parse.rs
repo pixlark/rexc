@@ -1,7 +1,8 @@
 use std::{cell::RefCell, collections::VecDeque, rc::Rc};
 
-use super::ast::*;
-use super::ir::{Operation, UnaryOperation};
+use crate::ast::*;
+use crate::ice::*;
+use crate::ir::{Operation, UnaryOperation};
 
 #[derive(Clone)]
 pub enum Span {
@@ -143,7 +144,7 @@ impl std::fmt::Display for TokenKind {
         match self {
             TokenKind::IntegerLiteral(..) => write!(fmt, "integer"),
             TokenKind::Identifier(..) => write!(fmt, "identifier"),
-            _ => unreachable!(),
+            _ => ice_unreachable!(),
         }
     }
 }
@@ -811,7 +812,7 @@ impl Parser {
                             kind: TokenKind::Identifier(name),
                             span,
                         }) => (name, span),
-                        _ => unreachable!(),
+                        _ => ice_unreachable!(),
                     };
 
                     let interior = separated!(self, expression, by TokenKind::Comma, terminated_by TokenKind::CloseParen);

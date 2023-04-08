@@ -4,9 +4,9 @@
 use std::cell::RefCell;
 use std::rc::Rc;
 
-use super::internal_error::*;
-use super::ir;
-use super::parse::Span;
+use crate::ice::{InternalCompilerError::*, *};
+use crate::ir;
+use crate::parse::Span;
 
 /// Type is special in our AST because many different
 /// instances of `Type` might point to the same "underlying"
@@ -67,7 +67,7 @@ impl std::cmp::PartialEq for Type {
             (Self::Named((_lhs_name, lhs_type)), Self::Named((_rhs_name, rhs_type))) => {
                 match (lhs_type, rhs_type) {
                     (Some(l), Some(r)) => Rc::ptr_eq(l, r),
-                    _ => rexc_panic("Tried to compare two ast::Type::Named instances that didn't have their data type references filled in!")
+                    _ => ice_error!(ComparedUntypedDataTypeReferences),
                 }
             }
             _ => core::mem::discriminant(self) == core::mem::discriminant(other),

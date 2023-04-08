@@ -7,10 +7,10 @@ use std::cell::RefCell;
 use std::collections::HashMap;
 use std::rc::Rc;
 
-use super::ast;
-use super::internal_error::*;
-use super::ir;
-use super::parse::Span;
+use crate::ast;
+use crate::ice::{InternalCompilerError::*, *};
+use crate::ir;
+use crate::parse::Span;
 
 #[derive(Debug)]
 pub enum TypeErrorKind {
@@ -207,9 +207,7 @@ impl TypedStatus {
     fn unwrap(self) {
         match self {
             TypedStatus::Ok => {}
-            TypedStatus::Incomplete => {
-                rexc_panic("Had an incomplete typing pass when it was assumed that was impossible!")
-            }
+            TypedStatus::Incomplete => ice_error!(IncompleteTypingPass),
         }
     }
 }
@@ -244,7 +242,7 @@ impl ir::UnaryOperation {
         match self {
             Self::Not => match type_ {
                 ast::Type::Bool => ast::Type::Bool,
-                _ => unreachable!(),
+                _ => ice_unreachable!(),
             },
         }
     }
@@ -280,14 +278,14 @@ impl ir::Operation {
         match self {
             Self::Add | Self::Subtract | Self::Multiply | Self::Divide => match (lhs, rhs) {
                 (ast::Type::Int, ast::Type::Int) => ast::Type::Int,
-                _ => unreachable!(),
+                _ => ice_unreachable!(),
             },
             Self::LessThan
             | Self::GreaterThan
             | Self::LessThanOrEqualTo
             | Self::GreaterThanOrEqualTo => match (lhs, rhs) {
                 (ast::Type::Int, ast::Type::Int) => ast::Type::Bool,
-                _ => unreachable!(),
+                _ => ice_unreachable!(),
             },
             Self::Equals | Self::NotEquals => match (lhs, rhs) {
                 (ast::Type::Int, ast::Type::Int) => ast::Type::Bool,
@@ -295,11 +293,11 @@ impl ir::Operation {
                 (ast::Type::Pointer(..), ast::Type::Pointer(..)) => ast::Type::Bool,
                 (ast::Type::Pointer(..), ast::Type::Nil) => ast::Type::Bool,
                 (ast::Type::Nil, ast::Type::Pointer(..)) => ast::Type::Bool,
-                _ => unreachable!(),
+                _ => ice_unreachable!(),
             },
             Self::And | Self::Or => match (lhs, rhs) {
                 (ast::Type::Bool, ast::Type::Bool) => ast::Type::Bool,
-                _ => unreachable!(),
+                _ => ice_unreachable!(),
             },
         }
     }
@@ -448,7 +446,7 @@ impl ast::Expression {
             ast::ExpressionKind::New((unfilled_type, ast::New { name, fields })) => {
                 let type_ = match type_map.get(name) {
                     Some(TypeBinding::Complete(t)) => t,
-                    Some(TypeBinding::Incomplete) => rexc_panic("Somehow an incomplete type binding got past the `data` typechecking phase!"),
+                    Some(TypeBinding::Incomplete) => ice_error!(IncompleteTypingPass),
                     None => {
                         return Err(TypeError {
                             kind: TypeErrorKind::NoSuchDataType(name.clone()),
@@ -525,7 +523,7 @@ impl ast::Expression {
 
                 *lhs_unfilled_type = Some(lhs_type);
 
-                let data_type = data_type.rexc_unwrap("Somehow a field access expression got past the typechecker without having its data_type reference filled in!");
+                let data_type = data_type.unwrap_with_ice(UnfilledTypeInference);
                 let type_ = data_type.borrow().check_field_access(field)?;
 
                 *unfilled_type = Some(type_.clone());
@@ -553,7 +551,7 @@ impl ast::LValue {
                         span,
                     })
                 }
-                None => unreachable!(), // TODO(Brooke): Is it?
+                None => ice_unreachable!(), // TODO(Brooke): Is it?
             },
             ast::LValueKind::Dereference(inner) => {
                 let inner_type = inner.typecheck(name_map, span.clone())?;
@@ -592,7 +590,7 @@ impl ast::LValue {
                     }
                 };
 
-                let data_type = data_type.rexc_unwrap("Somehow a field access expression got past the typechecker without having its data_type reference filled in!");
+                let data_type = data_type.unwrap_with_ice(UnfilledTypeInference);
                 let field_type = data_type.borrow().check_field_access(field)?;
                 field_type
             }
@@ -691,7 +689,7 @@ impl ast::Statement {
                 }
                 name_map.pop_scope();
             }
-            ast::StatementKind::While { .. } => should_have_been_desugared(),
+            ast::StatementKind::While { .. } => ice_error!(ShouldHaveBeenDesugared),
             ast::StatementKind::Break => {}
             ast::StatementKind::Print((unfilled_type, expression)) => {
                 let infer_type = expression.typecheck(type_map, name_map)?;

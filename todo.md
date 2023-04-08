@@ -6,3 +6,5 @@
  - make internal errors nicer in construct.rs (add internal error enum or something with Display impl)
  - Mutually recursive / out-of-order defined types
     - Will require more elegant way to check for recursive data types
+ - Make expressions directly callable as functions
+ - Lambdas!

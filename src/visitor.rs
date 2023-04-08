@@ -1,7 +1,7 @@
 //! The `Visitor` trait allows traversals of the AST to be quickly developed by
 //! overriding some of the default `visit_*` implementations
 
-use super::ast::*;
+use crate::ast::*;
 
 pub trait Visitor<E>: Sized {
     fn visit_lvalue(&mut self, lvalue: &mut LValue) -> Result<(), E> {

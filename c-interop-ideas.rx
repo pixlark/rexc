@@ -1,0 +1,126 @@
+# Some way to "bring in" symbols from c
+# This `backend c` declaration would mark the file
+# as only being compilable with the C backend!
+backend c {
+    import "SDL_Init": func()
+        as __SDL_Init
+
+    # Use "backend" on a type annotation to insert a literal C type annotation?
+    # TODO(Brooke): How on earth would this work for function pointers?
+    import "SDL_CreateRenderer": func(
+        backend "SDL_Window*",
+        backend "int",
+        backend "int"
+    ) -> backend "SDL_Renderer*"
+        as __SDL_CreateRenderer
+
+    # Opaque imports allows us to hold pointers to C data structures
+    opaque "SDL_Window" as SDL_Window
+    opaque "SDL_Renderer" as SDL_Renderer
+}
+
+# Symbols from `backend c` that we imported are accessible,
+# but their type annotations are likely full of `backend` types,
+# which we can't directly produce expressions for.
+
+# Standard library module for conversion to/from standard c types
+import ctypes
+
+# Wrapper functions for every `backend` import
+function SDL_Init() {
+    __SDL_Init()
+}
+
+function SDL_CreateRenderer(
+    window: *SDL_Window,
+    flags: int,
+    renderers: int)
+-> backend *SDL_Renderer {
+    __SDL_CreateRenderer(
+        opaque window,
+        ctypes.c_int(flags),
+        ctypes.c_int(renderers)
+    )
+}
+
+#.................
+
+# What about a *really* simple system of conversion?
+
+import ctypes
+
+function SDL_Init() {
+    opaque "SDL_Init()"
+}
+
+data SDL_Window {
+    handle: opaque "SDL_Window*"
+}
+
+function SDL_CreateWindow(
+    title: string,
+    posX: int, posY: int,
+    sizeX: int, sizeY: int,
+    flags: int
+) -> SDL_Window
+{
+    return new SDL_Window {
+        handle: opaque "SDL_CreateWindow(
+            ............
+        )"
+    }
+}
+
+#...................
+
+# Bang operator that "skips" that expression/type ahead straight to C compilation
+
+function SDL_Init() {
+    !SDL_Init()
+}
+
+function SDL_CreateWindow(
+    title: string,
+    posX: int, posY: int,
+    sizeX: int, sizeY: int,
+    flags: int
+) -> !*SDL_Window
+
+#.....................
+
+import ctypes
+# ctypes library contains:
+#   function toCInt(i: int) -> @cEmit("int") { ... }
+#   function toCString(s: string) -> @cEmit("char*") { ... }
+
+type c_int = @cEmit("int")
+type c_string = @cEmit("char*")
+type SDL_Window = @cEmit("SDL_Window*")
+
+function SDL_CreateWindow(
+    title: string,
+    posX: int, posY: int,
+    sizeX: int, sizeY: int,
+    flags: int
+) -> SDL_Window
+{
+    var __SDL_CreateWindow:
+        func(
+            c_string,
+            c_int, c_int,
+            c_int, c_int,
+            c_int
+        ) -> SDL_Window
+        = @cEmit("SDL_CreateWindow")
+    return __SDL_CreateWindow(
+        ctypes.toCString(c_string),
+        ctypes.toCInt(posX), ctypes.toCInt(posY),
+        ctypes.toCInt(sizeX), ctypes.toCInt(sizeY),
+        ctypes.toCInt(flags)
+    )
+}
+
+function main() -> int {
+
+    return 0
+}
