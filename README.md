@@ -131,6 +131,24 @@ Our handler can catch an unchecked exception just like a checked exception, agai
 
 I think both checked and unchecked exceptions have a place in most programs. In this compiler, for example, basic, expected errors that the programmer might make (say with syntax) as represented as checked exceptions in Rust (i.e. `Result`), whereas internal compiler errors that represent truly exceptional circumstances are represented as unchecked exceptions (i.e. `panic!`).
 
+#### Simple C interop
+
+Because we compile to C as a first-class target, it shouldn't be too hard to figure out a very clean way to interoperate with C code. This way, rexc programs get the benefit of having access to any of the tens of thousands of C libraries out there. Personally, I plan to use this feature to make games with rexc.
+
+#### Simple but powerful generics system
+
+I love Haskell/Rust and their exceptionally complex but elegantly beautiful generics systems. I have this perhaps-crazy idea, however, that for 90% of use-cases, a very simple templating system would work wonderfully instead.
+
+I need to do more research on this. I believe D has a similar system to what I'm thinking of, so I want to tinker with that and see what I get from it.
+
+#### Some sort of interface/typeclass/protocol system but this is very nebulous
+
+#### First-class support for monads?
+
+Monads are the single "killer feature" that place Haskell leagues ahead of its competitors. Rust is a little bit on the Monad train, but is limited by its borrow checker. A simple, garbage-collected, otherwise imperative programming language that somehow takes advantage of the Monad pattern in a non-clumsy, first-class way would be a godsend.
+
+Much like my other ideas, this is gonna take a lot more refinement before I know how it'll look.
+
 ### Why Rust?
 
 In the past I've mostly used C++ to write my lanugages. This is for a few reasons: one, it's easy to reason about performance; two, it's "easy" to manage lots and lots of complex state (if you don't care about memory safety, that is); and three, it was just what I knew best.
