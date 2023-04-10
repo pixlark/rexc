@@ -26,8 +26,14 @@ function main() -> int {
     print((at d2).a)
     print((at d2).b)
 
+    # Automatic pointer dereference
+    d2.a = 5
+    d2.b = false
+    print(d2.a)
+    print(d2.b)
+
     # Pass into function
-    var d3: *D = alloc(new D { a = 5, b = false })
+    var d3: *D = alloc(new D { a = 6, b = true })
     foo(d3)
 
     # Return from function
@@ -46,5 +52,5 @@ function foo(d: *D) {
 
 # Return position
 function bar() -> D {
-    return new D { a = 7, b = true }
+    return new D { a = 7, b = false }
 }

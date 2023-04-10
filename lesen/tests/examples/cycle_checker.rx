@@ -1,0 +1,72 @@
+data Link {
+    val: int
+    next: *Link
+}
+
+function hasCycle(head: *Link) -> bool {
+    if head == nil {
+        return false
+    }
+
+    var front: *Link = head
+    var back: *Link = head
+    if front.next == nil {
+        return false
+    }
+    front = front.next
+
+    loop {
+        if front == back {
+            return true
+        }
+        # Try to advance front by 2
+        if front.next == nil {
+            return false
+        }
+        front = front.next
+        if front.next == nil {
+            return false
+        }
+        front = front.next
+        # Advance back by 1
+        back = back.next
+    }
+    # unreachable!
+    return false
+}
+
+function append(head: *Link, to_append: int) -> *Link {
+    var new_link: *Link = alloc(new Link { val = to_append, next = nil })
+    if head == nil {
+        return new_link
+    }
+    var iter: *Link = head
+    while iter.next != nil {
+        iter = iter.next
+    }
+    iter.next = new_link
+    return head
+}
+
+function main() -> int {
+    var no_cycle: *Link = nil
+    no_cycle = append(no_cycle, 1)
+    no_cycle = append(no_cycle, 2)
+    no_cycle = append(no_cycle, 3)
+    no_cycle = append(no_cycle, 4)
+    no_cycle = append(no_cycle, 5)
+
+    print(hasCycle(no_cycle))
+
+    var cycle: *Link = nil
+    cycle = append(cycle, 1)
+    cycle = append(cycle, 2)
+    cycle = append(cycle, 3)
+    cycle = append(cycle, 4)
+
+    cycle.next.next.next.next = cycle.next
+
+    print(hasCycle(cycle))
+
+    return 0
+}

@@ -54,6 +54,7 @@ bitflags! {
     struct CompileFlags: u32 {
         const SHOW_EMITTED = 0b00000001;
         const EMIT_ONLY    = 0b00000010;
+        const EMIT_DEBUG   = 0b00000100;
     }
 }
 
@@ -84,7 +85,7 @@ impl<T, E> OrExit<T> for Result<T, E> {
     }
 }
 
-fn invoke_gcc(file_path: std::path::PathBuf, emit_path: std::path::PathBuf, _flags: CompileFlags) {
+fn invoke_gcc(file_path: std::path::PathBuf, emit_path: std::path::PathBuf, flags: CompileFlags) {
     // Assume `invoke_gcc` only called when EMIT_ONLY is not enabled.
     let gcc_path = which::which("gcc").or_exit("Could not find gcc on the PATH.");
 
@@ -125,6 +126,10 @@ fn invoke_gcc(file_path: std::path::PathBuf, emit_path: std::path::PathBuf, _fla
         .arg(".")
         .arg("-l")
         .arg("pthread");
+
+    if flags.contains(CompileFlags::EMIT_DEBUG) {
+        command.arg("-g");
+    }
 
     println!("Invoking gcc...\n    {:?}", command);
 
@@ -242,7 +247,8 @@ fn main() {
                 .about("Invoke the compiler directly on a source file")
                 .arg(clap::arg!(--source <PATH> "The source file to be compiled").required(true))
                 .arg(clap::arg!(--"show-emitted" "Print emitted C code to stdout"))
-                .arg(clap::arg!(--"emit-only" "Only emit C code, don't call GCC")),
+                .arg(clap::arg!(--"emit-only" "Only emit C code, don't call GCC"))
+                .arg(clap::arg!(--"debug-symbols" "Compile the generated code with debug symbols (does not actually refer to .rx file, only to generated .c!)")),
         );
     let matches = cmd.get_matches();
     match matches.subcommand() {
@@ -260,6 +266,12 @@ fn main() {
                 CompileFlags::EMIT_ONLY,
                 sub_matches
                     .get_one::<bool>("emit-only")
+                    .map_or(false, |b| *b),
+            );
+            flags.set(
+                CompileFlags::EMIT_DEBUG,
+                sub_matches
+                    .get_one::<bool>("debug-symbols")
                     .map_or(false, |b| *b),
             );
 

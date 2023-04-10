@@ -323,13 +323,13 @@ impl ast::DataType {
         }
         Ok(status)
     }
-    fn check_field_access(&self, field: &str) -> Result<ast::Type, TypeError> {
+    fn check_field_access(&self, field: &str, span: Span) -> Result<ast::Type, TypeError> {
         let (type_, _) = match self.fields.iter().find(|(_, name)| name == field) {
             Some(f) => f,
             None => {
                 return Err(TypeError {
                     kind: TypeErrorKind::NoSuchField(self.name.clone(), String::from(field)),
-                    span: self.span.clone(),
+                    span,
                 })
             }
         };
@@ -525,7 +525,9 @@ impl ast::Expression {
                 lhs_unfilled_type.assert_fill(lhs_type);
 
                 let data_type = data_type.unwrap_with_ice(UnfilledTypeInference);
-                let type_ = data_type.borrow().check_field_access(field)?;
+                let type_ = data_type
+                    .borrow()
+                    .check_field_access(field, self.span.clone())?;
 
                 unfilled_type.assert_fill(type_.clone());
                 Ok(type_)
@@ -552,7 +554,12 @@ impl ast::LValue {
                         span,
                     })
                 }
-                None => ice_unreachable!(), // TODO(Brooke): Is it?
+                None => {
+                    return Err(TypeError {
+                        kind: TypeErrorKind::UnboundVariable(name.clone()),
+                        span,
+                    })
+                }
             },
             ast::LValueKind::Dereference(inner) => {
                 let inner_type = inner.typecheck(name_map, span.clone())?;
@@ -566,6 +573,7 @@ impl ast::LValue {
                     }
                 }
             }
+            #[allow(clippy::let_and_return)]
             ast::LValueKind::FieldAccess {
                 lhs,
                 field,
@@ -592,7 +600,7 @@ impl ast::LValue {
                 };
 
                 let data_type = data_type.unwrap_with_ice(UnfilledTypeInference);
-                let field_type = data_type.borrow().check_field_access(field)?;
+                let field_type = data_type.borrow().check_field_access(field, span)?;
                 field_type
             }
         };

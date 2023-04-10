@@ -1,0 +1,40 @@
+data A {
+    x: int
+}
+
+data B {
+    y: *A
+}
+
+data Z {
+    a: A
+    b: B
+}
+
+function main() -> int {
+    var b: *B = alloc(
+        new B {
+            y = alloc(new A { x = 5 })
+        }
+    )
+
+    print(b.y.x)
+    print((at b.y).x)
+    print((at b).y.x)
+    print((at (at b).y).x)
+
+    var z: *Z = alloc(
+        new Z {
+            a = new A { x = 3 },
+            b = new B {
+                y = alloc(new A {
+                    x = 4
+                })
+            }
+        }
+    )
+
+    print(z.a.x + z.b.y.x)
+
+    return 0
+}
